@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
     <include domain="sharedpref" path="bypass_prefs.xml" />
-    <exclude domain="database" path="bypass_db" />
+    <include domain="database" path="bypass_db" />
 </full-backup-content>
