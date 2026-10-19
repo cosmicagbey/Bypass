@@ -1,0 +1,3 @@
+-keep class com.bypass.app.data.** { *; }
+-keep class com.bypass.app.service.** { *; }
+-dontwarn okhttp3.**

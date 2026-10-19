@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Bypass</string>
+    <string name="bubble_notification_title">Bypass is active</string>
+    <string name="bubble_notification_text">Tap the ⚡ bubble to download videos</string>
+    <string name="stop_service">Stop</string>
+    <string name="start_service">Start</string>
+    <string name="permission_needed">Overlay Permission Needed</string>
+    <string name="settings">Settings</string>
+    <string name="add_platform">Add Platform</string>
+    <string name="edit_platform">Edit Platform</string>
+    <string name="delete_platform">Delete Platform</string>
+</resources>
