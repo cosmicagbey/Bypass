@@ -8,7 +8,7 @@
     android:padding="10dp"
     android:clickable="true"
     android:focusable="true"
-    android:background="?attr/selectableItemBackground">
+    android:background="?android:attr/selectableItemBackground">
 
     <TextView
         android:id="@+id/btn_emoji"
