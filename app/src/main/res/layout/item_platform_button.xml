@@ -1,28 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One row in the platform picker for each enabled platform -->
+<!-- Stylish platform button row with badge, title and arrow indicator -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:padding="10dp"
+    android:paddingHorizontal="10dp"
+    android:paddingVertical="7dp"
+    android:layout_marginVertical="2dp"
     android:clickable="true"
     android:focusable="true"
-    android:background="?android:attr/selectableItemBackground">
+    android:background="@drawable/bg_picker_item">
 
-    <TextView
-        android:id="@+id/btn_emoji"
-        android:layout_width="36dp"
-        android:layout_height="36dp"
-        android:gravity="center"
-        android:textSize="22sp" />
+    <!-- Circular Badge for Emoji -->
+    <FrameLayout
+        android:id="@+id/badge_container"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:background="@drawable/bg_platform_badge">
 
+        <TextView
+            android:id="@+id/btn_emoji"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:textSize="20sp" />
+    </FrameLayout>
+
+    <!-- Platform Name -->
     <TextView
         android:id="@+id/btn_label"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
+        android:layout_weight="1"
+        android:layout_marginStart="12dp"
         android:textSize="14sp"
         android:textStyle="bold"
         android:textColor="@color/text_primary" />
+
+    <!-- Download/Chevron Indicator -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="4dp"
+        android:text="›"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="@color/text_secondary" />
 </LinearLayout>

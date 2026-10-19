@@ -61,12 +61,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "Bypass v1.0.1 (Latest APK)"
+          name: "Bypass v1.0.2 (Latest APK)"
           body: |
-            ### ⚡ Bypass Android APK v1.0.1
-            - **Compatible with Android 7.0+ (Android 7, 8, 9, 10, 11, 12, 13, 14)**
-            - **Universally signed release build** (V1 + V2 full APK signature scheme)
-            - **No zip needed:** Click **`Bypass.apk`** below to download and install directly on your phone.
+            ### ⚡ Bypass Android APK v1.0.2
+            - **Background Persistence:** Floating bubble remains active on screen even after closing/swiping away Bypass from recent apps.
+            - **Toggle Slide Animation:** Tapping the bubble expands the platform list; tapping it again (or tapping outside) smoothly slides the platforms back inside.
+            - **Stylish Platform Popups:** Redesigned animated card with vibrant platform badges, subtle tinting, bold typography, and smooth cascade entry.
+            - **Background Battery Helper:** Added one-tap background battery optimization request so aggressive task killers (Tecno HiOS, Infinix XOS, Samsung, MIUI) don't dismiss the bubble.
+            - **Universal Compatibility:** Signed release APK supporting Android 7.0 through Android 14.
+            - **Direct APK Download:** Tap **`Bypass.apk`** below to download and install directly.
           files: build-output/Bypass.apk
           prerelease: false
         env:

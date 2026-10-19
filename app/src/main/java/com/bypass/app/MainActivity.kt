@@ -8,6 +8,8 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
+import android.content.Context
+import android.os.PowerManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +36,7 @@ class MainActivity : ComponentActivity() {
 
     private var hasOverlayState = mutableStateOf(false)
     private var isServiceRunningState = mutableStateOf(false)
+    private var isBatteryOptimizedState = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,7 +47,9 @@ class MainActivity : ComponentActivity() {
                 HomeScreen(
                     hasOverlayPermission = { hasOverlayState.value },
                     isServiceRunning = { isServiceRunningState.value },
+                    isBatteryOptimizationIgnored = { isBatteryOptimizedState.value },
                     onRequestOverlayPermission = { requestOverlayPermission() },
+                    onRequestIgnoreBatteryOptimization = { requestIgnoreBatteryOptimization() },
                     onToggleService = { running ->
                         if (running) {
                             stopBubbleService()
@@ -68,6 +73,28 @@ class MainActivity : ComponentActivity() {
     private fun checkStates() {
         hasOverlayState.value = Settings.canDrawOverlays(this)
         isServiceRunningState.value = FloatingBubbleService.isRunning
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        isBatteryOptimizedState.value = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            powerManager?.isIgnoringBatteryOptimizations(packageName) == true
+        } else {
+            true
+        }
+    }
+
+    private fun requestIgnoreBatteryOptimization() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                try {
+                    val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    startActivity(fallback)
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     private fun requestOverlayPermission() {

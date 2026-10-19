@@ -28,13 +28,16 @@ import com.bypass.app.viewmodel.MainViewModel
 fun HomeScreen(
     hasOverlayPermission: () -> Boolean,
     isServiceRunning: () -> Boolean,
+    isBatteryOptimizationIgnored: () -> Boolean = { true },
     onRequestOverlayPermission: () -> Unit,
+    onRequestIgnoreBatteryOptimization: () -> Unit = {},
     onToggleService: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     viewModel: MainViewModel = viewModel()
 ) {
     val permissionGranted = hasOverlayPermission()
     val serviceRunning = isServiceRunning()
+    val batteryOptimized = isBatteryOptimizationIgnored()
     val platforms by viewModel.enabledPlatforms.collectAsState()
     var startOnBoot by remember { mutableStateOf(viewModel.startOnBoot) }
 
@@ -72,10 +75,17 @@ fun HomeScreen(
             // Hero card
             HeroCard(serviceRunning = serviceRunning)
 
-            // Permission card
+            // Overlay Permission card
             if (!permissionGranted) {
                 PermissionCard(onGrant = {
                     onRequestOverlayPermission()
+                })
+            }
+
+            // Battery Optimization card (for Tecno, Infinix, MIUI, Samsung)
+            if (!batteryOptimized) {
+                BatteryOptimizationCard(onAllow = {
+                    onRequestIgnoreBatteryOptimization()
                 })
             }
 
@@ -194,6 +204,40 @@ private fun PermissionCard(onGrant: () -> Unit) {
             }
             TextButton(onClick = onGrant) {
                 Text("Grant", color = Color(0xFFF59E0B))
+            }
+        }
+    }
+}
+
+@Composable
+private fun BatteryOptimizationCard(onAllow: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFFE0E7FF) // Soft indigo
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(Icons.Default.BatteryChargingFull, contentDescription = null, tint = Color(0xFF4338CA))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Keep Active In Background",
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF312E81)
+                )
+                Text(
+                    "Allow unrestricted battery so the bubble stays alive when app is closed",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFF4338CA)
+                )
+            }
+            TextButton(onClick = onAllow) {
+                Text("Allow", color = Color(0xFF4338CA), fontWeight = FontWeight.Bold)
             }
         }
     }

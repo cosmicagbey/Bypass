@@ -2,17 +2,20 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/bubble_root"
-    android:layout_width="64dp"
-    android:layout_height="64dp">
+    android:layout_width="66dp"
+    android:layout_height="66dp">
 
     <androidx.cardview.widget.CardView
-        android:layout_width="64dp"
-        android:layout_height="64dp"
-        app:cardCornerRadius="32dp"
-        app:cardElevation="8dp"
+        android:id="@+id/bubble_card"
+        android:layout_width="62dp"
+        android:layout_height="62dp"
+        android:layout_gravity="center"
+        app:cardCornerRadius="31dp"
+        app:cardElevation="10dp"
         app:cardBackgroundColor="#FF7C3AED">
 
         <TextView
+            android:id="@+id/bubble_icon"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:gravity="center"

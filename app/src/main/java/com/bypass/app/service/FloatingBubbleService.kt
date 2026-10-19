@@ -5,10 +5,14 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
 import android.view.*
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.*
 import androidx.core.app.NotificationCompat
 import com.bypass.app.BypassApp
@@ -34,11 +38,16 @@ class FloatingBubbleService : Service() {
     private var bubbleRoot: View? = null
     private var pickerRoot: View? = null
 
+    private var isPickerOpen = false
+    private var isPickerClosing = false
+    private var lastBubbleX = 24
+    private var lastBubbleY = 300
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val repository by lazy { (application as BypassApp).repository }
 
     // -----------------------------------------------------------------------
-    // Lifecycle
+    // Lifecycle & Background Persistence
     // -----------------------------------------------------------------------
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -63,15 +72,31 @@ class FloatingBubbleService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             stopSelf()
+            return START_NOT_STICKY
         }
         return START_STICKY
+    }
+
+    /**
+     * Called when the main app activity is swiped away from Recents.
+     * We keep the foreground service and floating bubble alive!
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        if (isRunning) {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIF_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(NOTIF_ID, buildNotification())
+            }
+        }
     }
 
     override fun onDestroy() {
         isRunning = false
         serviceScope.cancel()
+        removePickerInternal()
         removeBubble()
-        removePicker()
         super.onDestroy()
     }
 
@@ -83,10 +108,10 @@ class FloatingBubbleService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Bypass Bubble",
+                "Bypass Floating Bubble",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Floating downloader overlay button"
+                description = "Keeps the floating video downloader accessible on your screen"
                 setShowBadge(false)
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
@@ -120,6 +145,7 @@ class FloatingBubbleService : Service() {
             .setContentIntent(openIntent)
             .addAction(0, "Stop", stopIntent)
             .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
@@ -136,7 +162,7 @@ class FloatingBubbleService : Service() {
         val displayMetrics = resources.displayMetrics
         val screenWidth = displayMetrics.widthPixels
         val screenHeight = displayMetrics.heightPixels
-        val bubbleSize = (64 * displayMetrics.density).toInt()
+        val bubbleSize = (66 * displayMetrics.density).toInt()
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -149,6 +175,9 @@ class FloatingBubbleService : Service() {
             x = 24
             y = (screenHeight * 0.35f).toInt()
         }
+
+        lastBubbleX = params.x
+        lastBubbleY = params.y
 
         // Drag & Click logic
         var initialX = 0
@@ -171,17 +200,23 @@ class FloatingBubbleService : Service() {
                     val dx = (event.rawX - initialTouchX).toInt()
                     val dy = (event.rawY - initialTouchY).toInt()
                     if (Math.abs(dx) > 12 || Math.abs(dy) > 12) {
+                        if (!isDragging && isPickerOpen) {
+                            closePickerWithAnimation()
+                        }
                         isDragging = true
                     }
                     if (isDragging) {
                         params.x = (initialX + dx).coerceIn(0, screenWidth - bubbleSize)
                         params.y = (initialY + dy).coerceIn(0, screenHeight - bubbleSize)
+                        lastBubbleX = params.x
+                        lastBubbleY = params.y
                         windowManager.updateViewLayout(view, params)
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     if (!isDragging) {
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         togglePicker(params.x, params.y)
                     }
                     true
@@ -206,49 +241,86 @@ class FloatingBubbleService : Service() {
     }
 
     // -----------------------------------------------------------------------
-    // Platform Picker
+    // Stylish Platform Picker (Slide Out / Slide In Animations)
     // -----------------------------------------------------------------------
 
     private fun togglePicker(bubbleX: Int, bubbleY: Int) {
-        if (pickerRoot != null) {
-            removePicker()
-            return
-        }
-        serviceScope.launch {
-            val platforms = repository.enabledPlatforms.first()
-            showPicker(platforms, bubbleX, bubbleY)
+        if (isPickerClosing) return
+
+        if (isPickerOpen) {
+            closePickerWithAnimation()
+        } else {
+            serviceScope.launch {
+                val platforms = repository.enabledPlatforms.first()
+                openPickerWithAnimation(platforms, bubbleX, bubbleY)
+            }
         }
     }
 
-    private fun showPicker(platforms: List<Platform>, bubbleX: Int, bubbleY: Int) {
+    private fun openPickerWithAnimation(platforms: List<Platform>, bubbleX: Int, bubbleY: Int) {
         if (platforms.isEmpty()) {
-            Toast.makeText(this, "No platforms enabled. Add or enable platforms in Bypass.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "No platforms enabled. Open Bypass settings to add or enable platforms.", Toast.LENGTH_LONG).show()
             return
         }
 
+        // Animate bubble icon to ✕
+        val bubbleIcon = bubbleRoot?.findViewById<TextView>(R.id.bubble_icon)
+        bubbleIcon?.animate()
+            ?.rotation(90f)
+            ?.scaleX(0.85f)
+            ?.scaleY(0.85f)
+            ?.setDuration(160)
+            ?.withEndAction {
+                bubbleIcon.text = "✕"
+                bubbleIcon.rotation = 0f
+                bubbleIcon.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(120)?.start()
+            }
+            ?.start()
+
         val inflater = LayoutInflater.from(this)
         val view = inflater.inflate(R.layout.view_platform_picker, null)
+        val card = view.findViewById<View>(R.id.picker_card)
         val container = view.findViewById<LinearLayout>(R.id.picker_container)
 
-        platforms.forEach { platform ->
+        // Populate and configure each platform row
+        platforms.forEachIndexed { index, platform ->
             val btn = inflater.inflate(R.layout.item_platform_button, container, false)
             btn.findViewById<TextView>(R.id.btn_emoji).text = platform.emoji
             btn.findViewById<TextView>(R.id.btn_label).text = platform.name
+
+            // Dynamic tint on the emoji badge matching the platform accent color
+            try {
+                val colorInt = Color.parseColor(platform.colorHex)
+                val badge = btn.findViewById<View>(R.id.badge_container)
+                val shape = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor((colorInt and 0x00FFFFFF) or 0x22000000) // ~13% soft translucent tint
+                }
+                badge.background = shape
+            } catch (_: Exception) {}
+
             btn.setOnClickListener {
-                removePicker()
-                launchWebView(platform)
+                btn.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                closePickerWithAnimation {
+                    launchWebView(platform)
+                }
             }
+
+            // Initially invisible for staggered entrance ripple
+            btn.alpha = 0f
+            btn.translationY = 16f
             container.addView(btn)
         }
 
         val displayMetrics = resources.displayMetrics
         val screenWidth = displayMetrics.widthPixels
-        val pickerWidthPx = (180 * displayMetrics.density).toInt()
+        val pickerWidthPx = (210 * displayMetrics.density).toInt()
+        val isLeft = bubbleX > screenWidth / 2
 
-        val pickerX = if (bubbleX > screenWidth / 2) {
-            (bubbleX - pickerWidthPx).coerceAtLeast(16)
+        val pickerX = if (isLeft) {
+            (bubbleX - pickerWidthPx - (8 * displayMetrics.density).toInt()).coerceAtLeast(16)
         } else {
-            (bubbleX + (70 * displayMetrics.density).toInt()).coerceAtMost(screenWidth - pickerWidthPx - 16)
+            (bubbleX + (68 * displayMetrics.density).toInt()).coerceAtMost(screenWidth - pickerWidthPx - 16)
         }
 
         val params = WindowManager.LayoutParams(
@@ -263,28 +335,107 @@ class FloatingBubbleService : Service() {
             y = bubbleY.coerceAtLeast(24)
         }
 
+        // Outside touch dismisses with smooth slide-back
         view.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_OUTSIDE) {
-                removePicker()
+                closePickerWithAnimation()
                 true
             } else {
                 false
             }
         }
 
+        // Set initial transform: tucked next to the bubble
+        card.alpha = 0f
+        card.scaleX = 0.25f
+        card.scaleY = 0.25f
+        card.translationX = if (isLeft) 60f else -60f
+
         try {
             windowManager.addView(view, params)
             pickerRoot = view
+            isPickerOpen = true
+
+            // Smooth spring entrance
+            card.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .translationX(0f)
+                .setDuration(220)
+                .setInterpolator(OvershootInterpolator(1.2f))
+                .start()
+
+            // Staggered cascade entrance for each platform button
+            for (i in 0 until container.childCount) {
+                val child = container.getChildAt(i)
+                child.animate()
+                    .alpha(1f)
+                    .translationY(0f)
+                    .setStartDelay(50L + i * 35L)
+                    .setDuration(180)
+                    .start()
+            }
         } catch (_: Exception) {}
     }
 
-    private fun removePicker() {
+    private fun closePickerWithAnimation(onEndAction: (() -> Unit)? = null) {
+        if (isPickerClosing || pickerRoot == null) {
+            onEndAction?.invoke()
+            return
+        }
+
+        isPickerClosing = true
+
+        // Rotate bubble icon back to ⚡
+        val bubbleIcon = bubbleRoot?.findViewById<TextView>(R.id.bubble_icon)
+        bubbleIcon?.animate()
+            ?.rotation(-90f)
+            ?.scaleX(0.85f)
+            ?.scaleY(0.85f)
+            ?.setDuration(150)
+            ?.withEndAction {
+                bubbleIcon.text = "⚡"
+                bubbleIcon.rotation = 0f
+                bubbleIcon.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(110)?.start()
+            }
+            ?.start()
+
+        val card = pickerRoot?.findViewById<View>(R.id.picker_card)
+        val displayMetrics = resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val isLeft = lastBubbleX > screenWidth / 2
+
+        card?.animate()
+            ?.alpha(0f)
+            ?.scaleX(0.2f)
+            ?.scaleY(0.2f)
+            ?.translationX(if (isLeft) 60f else -60f)
+            ?.setDuration(180)
+            ?.setInterpolator(AccelerateInterpolator())
+            ?.withEndAction {
+                removePickerInternal()
+                isPickerClosing = false
+                isPickerOpen = false
+                onEndAction?.invoke()
+            }
+            ?.start() ?: run {
+                removePickerInternal()
+                isPickerClosing = false
+                isPickerOpen = false
+                onEndAction?.invoke()
+            }
+    }
+
+    private fun removePickerInternal() {
         pickerRoot?.let {
             try {
                 windowManager.removeView(it)
             } catch (_: Exception) {}
         }
         pickerRoot = null
+        isPickerOpen = false
+        isPickerClosing = false
     }
 
     // -----------------------------------------------------------------------

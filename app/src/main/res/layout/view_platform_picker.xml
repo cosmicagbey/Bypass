@@ -1,19 +1,63 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Stylish platform picker popup that smoothly expands/collapses next to the bubble -->
 <androidx.cardview.widget.CardView
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/picker_card"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    app:cardCornerRadius="16dp"
-    app:cardElevation="12dp"
+    app:cardCornerRadius="22dp"
+    app:cardElevation="16dp"
     app:cardBackgroundColor="@color/surface_card">
 
     <LinearLayout
-        android:id="@+id/picker_container"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="8dp"
-        android:minWidth="160dp" />
+        android:minWidth="200dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="10dp"
+        android:paddingHorizontal="10dp">
+
+        <!-- Header Chip -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="8dp"
+            android:paddingBottom="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⚡"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:text="SELECT PLATFORM"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.08"
+                android:textColor="#FF8B5CF6" />
+        </LinearLayout>
+
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginBottom="6dp"
+            android:background="@color/divider" />
+
+        <!-- Container for platform items -->
+        <LinearLayout
+            android:id="@+id/picker_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </LinearLayout>
 
 </androidx.cardview.widget.CardView>
