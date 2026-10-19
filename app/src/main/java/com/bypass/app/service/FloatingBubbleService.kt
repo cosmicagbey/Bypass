@@ -1,5 +1,6 @@
 package com.bypass.app.service
 
+import android.animation.ValueAnimator
 import android.app.*
 import android.content.ClipboardManager
 import android.content.Context
@@ -12,6 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import android.view.*
 import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.*
 import androidx.core.app.NotificationCompat
@@ -162,7 +164,10 @@ class FloatingBubbleService : Service() {
         val displayMetrics = resources.displayMetrics
         val screenWidth = displayMetrics.widthPixels
         val screenHeight = displayMetrics.heightPixels
-        val bubbleSize = (66 * displayMetrics.density).toInt()
+        val bubbleSize = (44 * displayMetrics.density).toInt()
+        val edgeMargin = (8 * displayMetrics.density).toInt()
+        val leftEdge = edgeMargin
+        val rightEdge = screenWidth - bubbleSize - edgeMargin
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -172,7 +177,7 @@ class FloatingBubbleService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 24
+            x = leftEdge
             y = (screenHeight * 0.35f).toInt()
         }
 
@@ -207,7 +212,7 @@ class FloatingBubbleService : Service() {
                     }
                     if (isDragging) {
                         params.x = (initialX + dx).coerceIn(0, screenWidth - bubbleSize)
-                        params.y = (initialY + dy).coerceIn(0, screenHeight - bubbleSize)
+                        params.y = (initialY + dy).coerceIn(edgeMargin, screenHeight - bubbleSize - (24 * displayMetrics.density).toInt())
                         lastBubbleX = params.x
                         lastBubbleY = params.y
                         windowManager.updateViewLayout(view, params)
@@ -215,7 +220,27 @@ class FloatingBubbleService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!isDragging) {
+                    if (isDragging) {
+                        // Smoothly snap bubble to whichever side is closer (left or right)
+                        val targetX = if (params.x + bubbleSize / 2 < screenWidth / 2) {
+                            leftEdge
+                        } else {
+                            rightEdge
+                        }
+
+                        ValueAnimator.ofInt(params.x, targetX).apply {
+                            duration = 220
+                            interpolator = DecelerateInterpolator(1.5f)
+                            addUpdateListener { va ->
+                                params.x = va.animatedValue as Int
+                                lastBubbleX = params.x
+                                try {
+                                    windowManager.updateViewLayout(view, params)
+                                } catch (_: Exception) {}
+                            }
+                            start()
+                        }
+                    } else {
                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         togglePicker(params.x, params.y)
                     }
@@ -320,7 +345,7 @@ class FloatingBubbleService : Service() {
         val pickerX = if (isLeft) {
             (bubbleX - pickerWidthPx - (8 * displayMetrics.density).toInt()).coerceAtLeast(16)
         } else {
-            (bubbleX + (68 * displayMetrics.density).toInt()).coerceAtMost(screenWidth - pickerWidthPx - 16)
+            (bubbleX + (48 * displayMetrics.density).toInt()).coerceAtMost(screenWidth - pickerWidthPx - 16)
         }
 
         val params = WindowManager.LayoutParams(
