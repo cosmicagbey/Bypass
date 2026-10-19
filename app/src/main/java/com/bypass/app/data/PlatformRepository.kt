@@ -22,7 +22,7 @@ class PlatformRepository(private val dao: PlatformDao) {
                 Platform(
                     name = "TikTok",
                     emoji = "🎵",
-                    colorHex = "#FF010101",
+                    colorHex = "#FF000000",
                     downloaderUrl = "https://snaptik.app",
                     isDefault = true,
                     sortOrder = 0
@@ -36,8 +36,8 @@ class PlatformRepository(private val dao: PlatformDao) {
                     sortOrder = 1
                 ),
                 Platform(
-                    name = "Twitter / X",
-                    emoji = "🐦",
+                    name = "X",
+                    emoji = "𝕏",
                     colorHex = "#FF000000",
                     downloaderUrl = "https://ssstwitter.com",
                     isDefault = true,
@@ -45,6 +45,36 @@ class PlatformRepository(private val dao: PlatformDao) {
                 )
             )
             defaults.forEach { dao.insert(it) }
+        }
+    }
+
+    companion object {
+        fun getPlatformIconRes(platformName: String): Int? {
+            val lower = platformName.lowercase()
+            return when {
+                lower.contains("tiktok") -> com.bypass.app.R.drawable.ic_logo_tiktok
+                lower.contains("facebook") || lower == "fb" -> com.bypass.app.R.drawable.ic_logo_facebook
+                lower.contains("twitter") || lower == "x" || lower.startsWith("x ") || lower.endsWith(" x") || lower.contains("/ x") -> com.bypass.app.R.drawable.ic_logo_x
+                lower.contains("instagram") || lower.contains("insta") -> com.bypass.app.R.drawable.ic_logo_instagram
+                lower.contains("youtube") || lower.contains("yt") -> com.bypass.app.R.drawable.ic_logo_youtube
+                else -> null
+            }
+        }
+
+        fun getPlatformBrandColor(platformName: String, fallbackColorHex: String): Int {
+            val lower = platformName.lowercase()
+            return when {
+                lower.contains("tiktok") -> android.graphics.Color.parseColor("#FF000000")
+                lower.contains("facebook") || lower == "fb" -> android.graphics.Color.parseColor("#FF1877F2")
+                lower.contains("twitter") || lower == "x" || lower.contains("/ x") -> android.graphics.Color.parseColor("#FF000000")
+                lower.contains("instagram") || lower.contains("insta") -> android.graphics.Color.parseColor("#FFE1306C")
+                lower.contains("youtube") || lower.contains("yt") -> android.graphics.Color.parseColor("#FFFF0000")
+                else -> try {
+                    android.graphics.Color.parseColor(fallbackColorHex)
+                } catch (_: Exception) {
+                    android.graphics.Color.parseColor("#FF7C3AED")
+                }
+            }
         }
     }
 }

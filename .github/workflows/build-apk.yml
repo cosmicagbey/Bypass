@@ -61,15 +61,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "Bypass v1.0.2 (Latest APK)"
+          name: "Bypass v1.0.3 (Latest APK)"
           body: |
-            ### ⚡ Bypass Android APK v1.0.2
-            - **Background Persistence:** Floating bubble remains active on screen even after closing/swiping away Bypass from recent apps.
-            - **Toggle Slide Animation:** Tapping the bubble expands the platform list; tapping it again (or tapping outside) smoothly slides the platforms back inside.
-            - **Stylish Platform Popups:** Redesigned animated card with vibrant platform badges, subtle tinting, bold typography, and smooth cascade entry.
-            - **Background Battery Helper:** Added one-tap background battery optimization request so aggressive task killers (Tecno HiOS, Infinix XOS, Samsung, MIUI) don't dismiss the bubble.
-            - **Universal Compatibility:** Signed release APK supporting Android 7.0 through Android 14.
-            - **Direct APK Download:** Tap **`Bypass.apk`** below to download and install directly.
+            ### ⚡ Bypass Android APK v1.0.3
+            - **Radial Fan-out Menu:** Replaced the large square popup with an ultra-clean radial fan-out menu that blooms directly out of the bubble.
+            - **Authentic Real-Time Brand Icons:** Real app vector icons for **X (Twitter)** with the official crisp mathematical '𝕏' logo, **TikTok**, **Facebook**, **Instagram**, and **YouTube**.
+            - **Minimalist Icon-Only Design:** No bulky text or large boxes — sleek circular buttons with real brand logos, haptic feedback, and fluid spring physics.
+            - **Smooth Retract Animation:** Tapping the bubble again or tapping outside smoothly pulls the radial icons back inside the bubble.
+            - **Side Edge-Snapping:** Floating icon docks and snaps magnetically along the sides of your screen.
+            - **Background Persistence:** Keeps running even when you close the app from recent tasks.
+            - **Direct APK Download:** Tap **`Bypass.apk`** below to download and install.
           files: build-output/Bypass.apk
           prerelease: false
         env:

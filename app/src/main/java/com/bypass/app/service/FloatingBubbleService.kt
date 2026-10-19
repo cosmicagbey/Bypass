@@ -21,6 +21,7 @@ import com.bypass.app.BypassApp
 import com.bypass.app.MainActivity
 import com.bypass.app.R
 import com.bypass.app.data.Platform
+import com.bypass.app.data.PlatformRepository
 import com.bypass.app.ui.WebViewActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -266,7 +267,8 @@ class FloatingBubbleService : Service() {
     }
 
     // -----------------------------------------------------------------------
-    // Stylish Platform Picker (Slide Out / Slide In Animations)
+    // -----------------------------------------------------------------------
+    // Radial Platform Menu (Fanned Out Circle Around Bubble)
     // -----------------------------------------------------------------------
 
     private fun togglePicker(bubbleX: Int, bubbleY: Int) {
@@ -277,14 +279,14 @@ class FloatingBubbleService : Service() {
         } else {
             serviceScope.launch {
                 val platforms = repository.enabledPlatforms.first()
-                openPickerWithAnimation(platforms, bubbleX, bubbleY)
+                openRadialMenuWithAnimation(platforms, bubbleX, bubbleY)
             }
         }
     }
 
-    private fun openPickerWithAnimation(platforms: List<Platform>, bubbleX: Int, bubbleY: Int) {
+    private fun openRadialMenuWithAnimation(platforms: List<Platform>, bubbleX: Int, bubbleY: Int) {
         if (platforms.isEmpty()) {
-            Toast.makeText(this, "No platforms enabled. Open Bypass settings to add or enable platforms.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "No platforms enabled. Open Bypass settings to enable platforms.", Toast.LENGTH_LONG).show()
             return
         }
 
@@ -303,66 +305,12 @@ class FloatingBubbleService : Service() {
             ?.start()
 
         val inflater = LayoutInflater.from(this)
-        val view = inflater.inflate(R.layout.view_platform_picker, null)
-        val card = view.findViewById<View>(R.id.picker_card)
-        val container = view.findViewById<LinearLayout>(R.id.picker_container)
+        val view = inflater.inflate(R.layout.view_radial_menu, null)
+        val container = view.findViewById<FrameLayout>(R.id.radial_container)
+        val backdrop = view.findViewById<View>(R.id.radial_backdrop)
 
-        // Populate and configure each platform row
-        platforms.forEachIndexed { index, platform ->
-            val btn = inflater.inflate(R.layout.item_platform_button, container, false)
-            btn.findViewById<TextView>(R.id.btn_emoji).text = platform.emoji
-            btn.findViewById<TextView>(R.id.btn_label).text = platform.name
-
-            // Dynamic tint on the emoji badge matching the platform accent color
-            try {
-                val colorInt = Color.parseColor(platform.colorHex)
-                val badge = btn.findViewById<View>(R.id.badge_container)
-                val shape = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor((colorInt and 0x00FFFFFF) or 0x22000000) // ~13% soft translucent tint
-                }
-                badge.background = shape
-            } catch (_: Exception) {}
-
-            btn.setOnClickListener {
-                btn.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                closePickerWithAnimation {
-                    launchWebView(platform)
-                }
-            }
-
-            // Initially invisible for staggered entrance ripple
-            btn.alpha = 0f
-            btn.translationY = 16f
-            container.addView(btn)
-        }
-
-        val displayMetrics = resources.displayMetrics
-        val screenWidth = displayMetrics.widthPixels
-        val pickerWidthPx = (210 * displayMetrics.density).toInt()
-        val isLeft = bubbleX > screenWidth / 2
-
-        val pickerX = if (isLeft) {
-            (bubbleX - pickerWidthPx - (8 * displayMetrics.density).toInt()).coerceAtLeast(16)
-        } else {
-            (bubbleX + (48 * displayMetrics.density).toInt()).coerceAtMost(screenWidth - pickerWidthPx - 16)
-        }
-
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            getOverlayType(),
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = pickerX
-            y = bubbleY.coerceAtLeast(24)
-        }
-
-        // Outside touch dismisses with smooth slide-back
-        view.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_OUTSIDE) {
+        backdrop.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
                 closePickerWithAnimation()
                 true
             } else {
@@ -370,37 +318,124 @@ class FloatingBubbleService : Service() {
             }
         }
 
-        // Set initial transform: tucked next to the bubble
-        card.alpha = 0f
-        card.scaleX = 0.25f
-        card.scaleY = 0.25f
-        card.translationX = if (isLeft) 60f else -60f
+        val displayMetrics = resources.displayMetrics
+        val density = displayMetrics.density
+        val screenWidth = displayMetrics.widthPixels
+        val screenHeight = displayMetrics.heightPixels
+        val bubbleSize = (44 * density).toInt()
+        val buttonSize = (44 * density).toInt()
+
+        val centerX = bubbleX + bubbleSize / 2
+        val centerY = bubbleY + bubbleSize / 2
+        val isLeft = centerX < screenWidth / 2
+
+        // Radial geometry: fan out ~76dp from bubble center
+        val radius = 76 * density
+        val count = platforms.size
+
+        // Calculate arc angles depending on which screen edge the bubble is resting on
+        val angles = when (count) {
+            1 -> if (isLeft) doubleArrayOf(0.0) else doubleArrayOf(180.0)
+            2 -> if (isLeft) doubleArrayOf(-32.0, 32.0) else doubleArrayOf(148.0, 212.0)
+            3 -> if (isLeft) doubleArrayOf(-48.0, 0.0, 48.0) else doubleArrayOf(132.0, 180.0, 228.0)
+            4 -> if (isLeft) doubleArrayOf(-54.0, -18.0, 18.0, 54.0) else doubleArrayOf(126.0, 162.0, 198.0, 234.0)
+            else -> {
+                val sweep = 120.0
+                val start = if (isLeft) -sweep / 2.0 else 180.0 - sweep / 2.0
+                val step = sweep / (count - 1).coerceAtLeast(1)
+                DoubleArray(count) { i -> start + i * step }
+            }
+        }
+
+        // Tilt arc if bubble is near top or bottom screen boundary
+        val tilt = when {
+            centerY < 130 * density -> if (isLeft) 24.0 else -24.0
+            centerY > screenHeight - (130 * density) -> if (isLeft) -24.0 else 24.0
+            else -> 0.0
+        }
+
+        platforms.forEachIndexed { i, platform ->
+            val btn = inflater.inflate(R.layout.item_radial_button, container, false) as androidx.cardview.widget.CardView
+
+            // Brand background color
+            val brandColor = PlatformRepository.getPlatformBrandColor(platform.name, platform.colorHex)
+            btn.setCardBackgroundColor(brandColor)
+
+            // Setup real-time brand icon or fallback emoji
+            val iconRes = PlatformRepository.getPlatformIconRes(platform.name)
+            val iconView = btn.findViewById<ImageView>(R.id.radial_button_icon)
+            val emojiView = btn.findViewById<TextView>(R.id.radial_button_emoji)
+
+            if (iconRes != null) {
+                iconView.setImageResource(iconRes)
+                iconView.visibility = View.VISIBLE
+                emojiView.visibility = View.GONE
+            } else {
+                emojiView.text = platform.emoji
+                emojiView.visibility = View.VISIBLE
+                iconView.visibility = View.GONE
+            }
+
+            // Position initially centered at the bubble's center
+            val lp = FrameLayout.LayoutParams(buttonSize, buttonSize).apply {
+                leftMargin = centerX - buttonSize / 2
+                topMargin = centerY - buttonSize / 2
+            }
+            btn.layoutParams = lp
+
+            btn.translationX = 0f
+            btn.translationY = 0f
+            btn.scaleX = 0f
+            btn.scaleY = 0f
+            btn.alpha = 0f
+
+            btn.setOnClickListener {
+                btn.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                btn.animate()
+                    .scaleX(1.15f)
+                    .scaleY(1.15f)
+                    .setDuration(90)
+                    .withEndAction {
+                        closePickerWithAnimation {
+                            launchWebView(platform)
+                        }
+                    }
+                    .start()
+            }
+
+            container.addView(btn)
+
+            // Calculate radial offset
+            val angleDeg = angles[i] + tilt
+            val rad = Math.toRadians(angleDeg)
+            val deltaX = (radius * Math.cos(rad)).toFloat()
+            val deltaY = (radius * Math.sin(rad)).toFloat()
+
+            // Smooth spring fan-out animation
+            btn.animate()
+                .translationX(deltaX)
+                .translationY(deltaY)
+                .scaleX(1.0f)
+                .scaleY(1.0f)
+                .alpha(1.0f)
+                .setDuration(260)
+                .setStartDelay((i * 35).toLong())
+                .setInterpolator(OvershootInterpolator(1.4f))
+                .start()
+        }
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            getOverlayType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
 
         try {
             windowManager.addView(view, params)
             pickerRoot = view
             isPickerOpen = true
-
-            // Smooth spring entrance
-            card.animate()
-                .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
-                .translationX(0f)
-                .setDuration(220)
-                .setInterpolator(OvershootInterpolator(1.2f))
-                .start()
-
-            // Staggered cascade entrance for each platform button
-            for (i in 0 until container.childCount) {
-                val child = container.getChildAt(i)
-                child.animate()
-                    .alpha(1f)
-                    .translationY(0f)
-                    .setStartDelay(50L + i * 35L)
-                    .setDuration(180)
-                    .start()
-            }
         } catch (_: Exception) {}
     }
 
@@ -426,30 +461,35 @@ class FloatingBubbleService : Service() {
             }
             ?.start()
 
-        val card = pickerRoot?.findViewById<View>(R.id.picker_card)
-        val displayMetrics = resources.displayMetrics
-        val screenWidth = displayMetrics.widthPixels
-        val isLeft = lastBubbleX > screenWidth / 2
+        val container = pickerRoot?.findViewById<FrameLayout>(R.id.radial_container)
+        val childCount = container?.childCount ?: 0
 
-        card?.animate()
-            ?.alpha(0f)
-            ?.scaleX(0.2f)
-            ?.scaleY(0.2f)
-            ?.translationX(if (isLeft) 60f else -60f)
-            ?.setDuration(180)
-            ?.setInterpolator(AccelerateInterpolator())
-            ?.withEndAction {
-                removePickerInternal()
-                isPickerClosing = false
-                isPickerOpen = false
-                onEndAction?.invoke()
-            }
-            ?.start() ?: run {
-                removePickerInternal()
-                isPickerClosing = false
-                isPickerOpen = false
-                onEndAction?.invoke()
-            }
+        if (childCount == 0) {
+            removePickerInternal()
+            onEndAction?.invoke()
+            return
+        }
+
+        for (i in 0 until childCount) {
+            val child = container?.getChildAt(i)
+            val isLast = (i == childCount - 1)
+            child?.animate()
+                ?.translationX(0f)
+                ?.translationY(0f)
+                ?.scaleX(0f)
+                ?.scaleY(0f)
+                ?.alpha(0f)
+                ?.setDuration(170)
+                ?.setStartDelay(((childCount - 1 - i) * 20).toLong())
+                ?.setInterpolator(AccelerateInterpolator())
+                ?.withEndAction {
+                    if (isLast) {
+                        removePickerInternal()
+                        onEndAction?.invoke()
+                    }
+                }
+                ?.start()
+        }
     }
 
     private fun removePickerInternal() {

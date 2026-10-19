@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/radial_button_card"
+    android:layout_width="44dp"
+    android:layout_height="44dp"
+    app:cardCornerRadius="22dp"
+    app:cardElevation="8dp"
+    app:cardBackgroundColor="#FF1E1B4B"
+    android:clickable="true"
+    android:focusable="true"
+    android:foreground="?android:attr/selectableItemBackground">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:padding="9dp">
+
+        <ImageView
+            android:id="@+id/radial_button_icon"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="Platform icon"
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/radial_button_emoji"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:textSize="18sp"
+            android:visibility="gone" />
+    </FrameLayout>
+</androidx.cardview.widget.CardView>
