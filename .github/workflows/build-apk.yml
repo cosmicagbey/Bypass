@@ -29,18 +29,25 @@ jobs:
         with:
           gradle-version: "8.4"
 
-      - name: Build Debug APK
-        run: gradle assembleDebug --stacktrace
+      - name: Ensure Release Keystore exists
+        run: |
+          if [ ! -f app/release.keystore ]; then
+            echo "Generating release keystore..."
+            keytool -genkey -v -keystore app/release.keystore -alias bypass -keyalg RSA -keysize 2048 -validity 10000 -storepass bypasskeystore -keypass bypasskeystore -dname "CN=Bypass, OU=App, O=Bypass, L=City, ST=State, C=US"
+          fi
+
+      - name: Build Signed Release APK
+        run: gradle assembleRelease --stacktrace
 
       - name: Prepare APK for Release
         run: |
           mkdir -p build-output
-          APK_PATH=$(find app/build/outputs/apk/debug/ -name "*.apk" | head -n 1)
+          APK_PATH=$(find app/build/outputs/apk/release/ -name "*.apk" | head -n 1)
           if [ -n "$APK_PATH" ]; then
             cp "$APK_PATH" build-output/Bypass.apk
-            echo "Found APK at $APK_PATH -> copied to build-output/Bypass.apk"
+            echo "Found Release APK at $APK_PATH -> copied to build-output/Bypass.apk"
           else
-            echo "APK not found!" && exit 1
+            echo "Release APK not found!" && exit 1
           fi
 
       - name: Upload APK Artifact
@@ -50,13 +57,17 @@ jobs:
           path: build-output/Bypass.apk
           retention-days: 30
 
-      - name: Publish GitHub Release (on version tag)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish or Update 'latest' GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: latest
+          name: "Bypass v1.0.1 (Latest APK)"
+          body: |
+            ### ⚡ Bypass Android APK v1.0.1
+            - **Compatible with Android 7.0+ (Android 7, 8, 9, 10, 11, 12, 13, 14)**
+            - **Universally signed release build** (V1 + V2 full APK signature scheme)
+            - **No zip needed:** Click **`Bypass.apk`** below to download and install directly on your phone.
           files: build-output/Bypass.apk
-          generate_release_notes: true
-          draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

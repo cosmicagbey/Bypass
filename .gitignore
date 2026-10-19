@@ -45,6 +45,7 @@ captures/
 # Keystore files
 *.jks
 *.keystore
+!app/release.keystore
 
 # Google Services (Firebase)
 google-services.json

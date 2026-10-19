@@ -14,9 +14,12 @@ class BootReceiver : BroadcastReceiver() {
         val prefs: SharedPreferences =
             context.getSharedPreferences("bypass_prefs", Context.MODE_PRIVATE)
         if (prefs.getBoolean("start_on_boot", false)) {
-            context.startForegroundService(
-                Intent(context, FloatingBubbleService::class.java)
-            )
+            val serviceIntent = Intent(context, FloatingBubbleService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
         }
     }
 }

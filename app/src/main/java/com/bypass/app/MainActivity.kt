@@ -102,7 +102,11 @@ class MainActivity : ComponentActivity() {
     private fun startBubbleServiceInternal() {
         try {
             val intent = Intent(this, FloatingBubbleService::class.java)
-            startForegroundService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
             isServiceRunningState.value = true
         } catch (e: Exception) {
             Toast.makeText(this, "Failed to start overlay: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
