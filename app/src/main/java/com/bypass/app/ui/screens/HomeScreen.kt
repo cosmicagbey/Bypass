@@ -76,7 +76,6 @@ fun HomeScreen(
             if (!permissionGranted) {
                 PermissionCard(onGrant = {
                     onRequestOverlayPermission()
-                    permissionGranted = hasOverlayPermission()
                 })
             }
 

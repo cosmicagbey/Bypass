@@ -73,7 +73,7 @@ fun SettingsScreen(
                     .padding(padding)
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(vertical = 12.dp, bottom = 100.dp)
+                contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp)
             ) {
                 item {
                     Text(
@@ -141,6 +141,7 @@ fun SettingsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlatformListItem(
     platform: Platform,

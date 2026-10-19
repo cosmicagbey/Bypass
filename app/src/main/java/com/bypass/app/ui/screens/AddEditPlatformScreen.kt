@@ -113,7 +113,7 @@ fun AddEditPlatformSheet(
                 }
             }
 
-            HorizontalDivider()
+            Divider()
 
             // Name field
             OutlinedTextField(
@@ -214,6 +214,10 @@ fun AddEditPlatformSheet(
                     urlError = url.isBlank() || !url.startsWith("http")
                     if (!nameError && !urlError) {
                         val saved = (platform ?: Platform(
+                            name = name.trim(),
+                            emoji = emoji,
+                            colorHex = colorHex,
+                            downloaderUrl = url.trim(),
                             sortOrder = existingCount
                         )).copy(
                             name = name.trim(),
