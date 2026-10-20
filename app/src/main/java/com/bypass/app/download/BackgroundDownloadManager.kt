@@ -40,16 +40,24 @@ object BackgroundDownloadManager {
         "yandex", "adnxs", "exoclick", "trafficjunky", "ad-delivery"
     )
 
+    fun extractUrl(text: String): String {
+        if (text.isBlank()) return ""
+        val regex = Regex("""https?://[^\s<>"'{}|\\^`]+""")
+        val match = regex.find(text)
+        return match?.value ?: ""
+    }
+
     /**
      * Main entry point to download a video silently in the background.
      */
     suspend fun startDownload(
         context: Context,
         platform: Platform,
-        clipboardUrl: String,
+        rawClipboardText: String,
         onFallbackToBrowser: () -> Unit
     ) {
-        if (clipboardUrl.isBlank() || !clipboardUrl.startsWith("http")) {
+        val cleanUrl = extractUrl(rawClipboardText)
+        if (cleanUrl.isBlank()) {
             withContext(Dispatchers.Main) {
                 Toast.makeText(context, "No valid link found in clipboard! Copy a link first.", Toast.LENGTH_LONG).show()
             }
@@ -57,12 +65,12 @@ object BackgroundDownloadManager {
         }
 
         withContext(Dispatchers.Main) {
-            Toast.makeText(context, "⚡ Fetching video in background...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "⚡ Fetching ${platform.name} video...", Toast.LENGTH_SHORT).show()
         }
 
         // --- Step 1: Try direct high-speed stream extractors (Instant & 100% ad-free) ---
         val directDownloadUrl = withContext(Dispatchers.IO) {
-            resolveDirectStreamUrl(clipboardUrl, platform.name)
+            resolveDirectStreamUrl(cleanUrl, platform.name)
         }
 
         if (!directDownloadUrl.isNullOrBlank()) {
@@ -74,8 +82,7 @@ object BackgroundDownloadManager {
 
         // --- Step 2: Headless background WebView automation (Ad-blocked) ---
         withContext(Dispatchers.Main) {
-            startHeadlessAutomation(context, platform, clipboardUrl, onFallbackToBrowser)
-        }
+            startHeadlessAutomation(context, platform, cleanUrl, onFallbackToBrowser)
     }
 
     // -----------------------------------------------------------------------

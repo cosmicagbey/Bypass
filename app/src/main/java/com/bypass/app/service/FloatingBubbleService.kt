@@ -23,6 +23,7 @@ import com.bypass.app.R
 import com.bypass.app.data.Platform
 import com.bypass.app.data.PlatformRepository
 import com.bypass.app.download.BackgroundDownloadManager
+import com.bypass.app.ui.ClipboardCaptureActivity
 import com.bypass.app.ui.WebViewActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -519,22 +520,40 @@ class FloatingBubbleService : Service() {
 
     private fun triggerBackgroundDownload(platform: Platform) {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clipData = clipboard.primaryClip
-        val copiedUrl = if (clipData != null && clipData.itemCount > 0) {
-            clipData.getItemAt(0)?.text?.toString()?.trim() ?: ""
+        val clipData = try { clipboard.primaryClip } catch (_: Exception) { null }
+        val directText = if (clipData != null && clipData.itemCount > 0) {
+            clipData.getItemAt(0)?.text?.toString() ?: ""
         } else {
             ""
         }
 
-        serviceScope.launch {
-            BackgroundDownloadManager.startDownload(
-                context = this@FloatingBubbleService,
-                platform = platform,
-                clipboardUrl = copiedUrl,
-                onFallbackToBrowser = {
-                    launchWebView(platform)
+        val directUrl = BackgroundDownloadManager.extractUrl(directText)
+        if (directUrl.isNotBlank()) {
+            serviceScope.launch {
+                BackgroundDownloadManager.startDownload(
+                    context = this@FloatingBubbleService,
+                    platform = platform,
+                    rawClipboardText = directUrl,
+                    onFallbackToBrowser = {
+                        launchWebView(platform, directUrl)
+                    }
+                )
+            }
+        } else {
+            // Android 10+ background restriction: capture clipboard with 1-frame transparent activity
+            ClipboardCaptureActivity.capture(this) { capturedText ->
+                val cleanUrl = BackgroundDownloadManager.extractUrl(capturedText)
+                serviceScope.launch {
+                    BackgroundDownloadManager.startDownload(
+                        context = this@FloatingBubbleService,
+                        platform = platform,
+                        rawClipboardText = cleanUrl,
+                        onFallbackToBrowser = {
+                            launchWebView(platform, cleanUrl)
+                        }
+                    )
                 }
-            )
+            }
         }
     }
 
@@ -542,20 +561,24 @@ class FloatingBubbleService : Service() {
     // Launch WebView
     // -----------------------------------------------------------------------
 
-    private fun launchWebView(platform: Platform) {
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clipData = clipboard.primaryClip
-        val copiedUrl = if (clipData != null && clipData.itemCount > 0) {
-            clipData.getItemAt(0)?.text?.toString() ?: ""
+    private fun launchWebView(platform: Platform, prefilledUrl: String = "") {
+        val finalUrl = if (prefilledUrl.isNotBlank()) {
+            prefilledUrl
         } else {
-            ""
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clipData = try { clipboard.primaryClip } catch (_: Exception) { null }
+            if (clipData != null && clipData.itemCount > 0) {
+                BackgroundDownloadManager.extractUrl(clipData.getItemAt(0)?.text?.toString() ?: "")
+            } else {
+                ""
+            }
         }
 
         val intent = Intent(this, WebViewActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             putExtra(WebViewActivity.EXTRA_URL, platform.downloaderUrl)
             putExtra(WebViewActivity.EXTRA_PLATFORM_NAME, platform.name)
-            putExtra(WebViewActivity.EXTRA_CLIPBOARD_URL, copiedUrl)
+            putExtra(WebViewActivity.EXTRA_CLIPBOARD_URL, finalUrl)
         }
         startActivity(intent)
     }

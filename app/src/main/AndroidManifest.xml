@@ -42,6 +42,15 @@
             android:theme="@style/Theme.Bypass.BottomSheet"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Transparent clipboard capture activity (Android 10+ clipboard access) -->
+        <activity
+            android:name=".ui.ClipboardCaptureActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:finishOnTaskLaunch="true" />
+
         <!-- Floating bubble foreground service -->
         <service
             android:name=".service.FloatingBubbleService"

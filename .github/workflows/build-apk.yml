@@ -61,15 +61,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "Bypass v1.0.4 (Latest APK)"
+          name: "Bypass v1.0.5 (Latest APK)"
           body: |
-            ### ⚡ Bypass Android APK v1.0.4
+            ### ⚡ Bypass Android APK v1.0.5
+            - **Fixed Clipboard Access on Android 10+:** Resolved the "no valid link found in clipboard" issue caused by Android 10+ background overlay restrictions using transparent focus capture.
+            - **Smart URL Extractor:** Automatically extracts pure video links from shared messages containing extra text (e.g. "Check out this reel https://fb.watch/...").
             - **100% Background Silent Downloads:** The mini-browser never pops up! Downloads happen completely behind the scenes without interrupting your feed.
             - **Zero Ads Engine:** Direct video stream resolvers bypass downloader website ads and trackers entirely.
-            - **Headless Ad-Blocking Fallback:** Automated background engine with popup blocking and ad-network suppression.
             - **Radial Fan-out Menu & Real Brand Logos:** Beautiful blooming arc with official **X (Twitter)**, **TikTok**, **Facebook**, **Instagram**, and **YouTube** logos.
-            - **Native Android DownloadManager:** Progress bar notifications and direct gallery downloads.
-            - **Manual Browser Option:** Long-press any platform icon if you ever want to open the mini-browser manually.
             - **Direct APK Download:** Tap **`Bypass.apk`** below to download and install.
           files: build-output/Bypass.apk
           prerelease: false
