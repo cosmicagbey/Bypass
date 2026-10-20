@@ -22,6 +22,7 @@ import com.bypass.app.MainActivity
 import com.bypass.app.R
 import com.bypass.app.data.Platform
 import com.bypass.app.data.PlatformRepository
+import com.bypass.app.download.BackgroundDownloadManager
 import com.bypass.app.ui.WebViewActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -397,10 +398,19 @@ class FloatingBubbleService : Service() {
                     .setDuration(90)
                     .withEndAction {
                         closePickerWithAnimation {
-                            launchWebView(platform)
+                            triggerBackgroundDownload(platform)
                         }
                     }
                     .start()
+            }
+
+            // Long-click allows opening mini-browser manually if desired
+            btn.setOnLongClickListener {
+                btn.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                closePickerWithAnimation {
+                    launchWebView(platform)
+                }
+                true
             }
 
             container.addView(btn)
@@ -501,6 +511,31 @@ class FloatingBubbleService : Service() {
         pickerRoot = null
         isPickerOpen = false
         isPickerClosing = false
+    }
+
+    // -----------------------------------------------------------------------
+    // Background Download Execution
+    // -----------------------------------------------------------------------
+
+    private fun triggerBackgroundDownload(platform: Platform) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clipData = clipboard.primaryClip
+        val copiedUrl = if (clipData != null && clipData.itemCount > 0) {
+            clipData.getItemAt(0)?.text?.toString()?.trim() ?: ""
+        } else {
+            ""
+        }
+
+        serviceScope.launch {
+            BackgroundDownloadManager.startDownload(
+                context = this@FloatingBubbleService,
+                platform = platform,
+                clipboardUrl = copiedUrl,
+                onFallbackToBrowser = {
+                    launchWebView(platform)
+                }
+            )
+        }
     }
 
     // -----------------------------------------------------------------------

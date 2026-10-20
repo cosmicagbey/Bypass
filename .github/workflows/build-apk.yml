@@ -61,15 +61,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "Bypass v1.0.3 (Latest APK)"
+          name: "Bypass v1.0.4 (Latest APK)"
           body: |
-            ### ⚡ Bypass Android APK v1.0.3
-            - **Radial Fan-out Menu:** Replaced the large square popup with an ultra-clean radial fan-out menu that blooms directly out of the bubble.
-            - **Authentic Real-Time Brand Icons:** Real app vector icons for **X (Twitter)** with the official crisp mathematical '𝕏' logo, **TikTok**, **Facebook**, **Instagram**, and **YouTube**.
-            - **Minimalist Icon-Only Design:** No bulky text or large boxes — sleek circular buttons with real brand logos, haptic feedback, and fluid spring physics.
-            - **Smooth Retract Animation:** Tapping the bubble again or tapping outside smoothly pulls the radial icons back inside the bubble.
-            - **Side Edge-Snapping:** Floating icon docks and snaps magnetically along the sides of your screen.
-            - **Background Persistence:** Keeps running even when you close the app from recent tasks.
+            ### ⚡ Bypass Android APK v1.0.4
+            - **100% Background Silent Downloads:** The mini-browser never pops up! Downloads happen completely behind the scenes without interrupting your feed.
+            - **Zero Ads Engine:** Direct video stream resolvers bypass downloader website ads and trackers entirely.
+            - **Headless Ad-Blocking Fallback:** Automated background engine with popup blocking and ad-network suppression.
+            - **Radial Fan-out Menu & Real Brand Logos:** Beautiful blooming arc with official **X (Twitter)**, **TikTok**, **Facebook**, **Instagram**, and **YouTube** logos.
+            - **Native Android DownloadManager:** Progress bar notifications and direct gallery downloads.
+            - **Manual Browser Option:** Long-press any platform icon if you ever want to open the mini-browser manually.
             - **Direct APK Download:** Tap **`Bypass.apk`** below to download and install.
           files: build-output/Bypass.apk
           prerelease: false
