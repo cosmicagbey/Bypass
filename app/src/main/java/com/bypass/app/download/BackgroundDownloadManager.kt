@@ -83,6 +83,7 @@ object BackgroundDownloadManager {
         // --- Step 2: Headless background WebView automation (Ad-blocked) ---
         withContext(Dispatchers.Main) {
             startHeadlessAutomation(context, platform, cleanUrl, onFallbackToBrowser)
+        }
     }
 
     // -----------------------------------------------------------------------
