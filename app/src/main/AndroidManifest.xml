@@ -35,10 +35,12 @@
             </intent-filter>
         </activity>
 
-        <!-- Mini browser activity -->
+        <!-- Mini browser activity (own task so dismissing doesn't bring main app forward) -->
         <activity
             android:name=".ui.WebViewActivity"
             android:exported="false"
+            android:taskAffinity="com.bypass.app.webview"
+            android:excludeFromRecents="true"
             android:theme="@style/Theme.Bypass.BottomSheet"
             android:windowSoftInputMode="adjustResize" />
 

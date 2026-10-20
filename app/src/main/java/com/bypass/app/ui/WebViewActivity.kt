@@ -2,11 +2,14 @@ package com.bypass.app.ui
 
 import android.annotation.SuppressLint
 import android.app.DownloadManager
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.webkit.*
 import android.widget.ImageButton
@@ -20,6 +23,10 @@ import com.bypass.app.R
  * It loads the downloader URL and, once the page is ready, injects
  * the clipboard URL into the first visible text input on the page.
  * It also hooks into Android's DownloadManager to seamlessly handle video downloads.
+ *
+ * This Activity runs in its own task (taskAffinity) so that finishing it
+ * returns the user to whatever app they were previously using, NOT the
+ * Bypass main activity.
  */
 class WebViewActivity : ComponentActivity() {
 
@@ -38,7 +45,11 @@ class WebViewActivity : ComponentActivity() {
 
         val url = intent.getStringExtra(EXTRA_URL) ?: run { finish(); return }
         val platformName = intent.getStringExtra(EXTRA_PLATFORM_NAME) ?: "Downloader"
-        val clipboardUrl = intent.getStringExtra(EXTRA_CLIPBOARD_URL) ?: ""
+
+        // Read clipboard URL: prefer the intent extra (if provided), otherwise read clipboard
+        // directly. Since this is a focused Activity, clipboard access works on Android 10+.
+        val clipboardUrl = intent.getStringExtra(EXTRA_CLIPBOARD_URL)?.takeIf { it.isNotBlank() }
+            ?: readClipboardUrl()
 
         // Dim background tap dismisses bottom sheet
         findViewById<View>(R.id.dim_background).setOnClickListener { finish() }
@@ -94,6 +105,9 @@ class WebViewActivity : ComponentActivity() {
                 val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
                 downloadManager.enqueue(request)
                 Toast.makeText(this, "Downloading: $fileName", Toast.LENGTH_SHORT).show()
+
+                // Auto-dismiss after download starts so user returns to their previous app
+                Handler(Looper.getMainLooper()).postDelayed({ finish() }, 1200)
             } catch (e: Exception) {
                 // If download manager fails, open in system browser as fallback
                 try {
@@ -126,6 +140,30 @@ class WebViewActivity : ComponentActivity() {
         }
 
         webView.loadUrl(url)
+    }
+
+    /**
+     * Reads the clipboard and extracts a URL from it.
+     * Returns empty string if nothing usable is found.
+     */
+    private fun readClipboardUrl(): String {
+        return try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clipData = clipboard.primaryClip
+            if (clipData != null && clipData.itemCount > 0) {
+                val text = clipData.getItemAt(0)?.text?.toString() ?: ""
+                extractUrl(text)
+            } else ""
+        } catch (_: Exception) { "" }
+    }
+
+    /**
+     * Pulls the first http/https URL out of arbitrary text.
+     */
+    private fun extractUrl(text: String): String {
+        if (text.isBlank()) return ""
+        val regex = Regex("https?://[^\\s\"'<>]+")
+        return regex.find(text)?.value ?: ""
     }
 
     /**

@@ -23,7 +23,7 @@ class PlatformRepository(private val dao: PlatformDao) {
                     name = "TikTok",
                     emoji = "🎵",
                     colorHex = "#FF000000",
-                    downloaderUrl = "https://snaptik.app",
+                    downloaderUrl = "https://en1.savefrom.net/16Em/download-from-tiktok",
                     isDefault = true,
                     sortOrder = 0
                 ),
@@ -31,7 +31,7 @@ class PlatformRepository(private val dao: PlatformDao) {
                     name = "Facebook",
                     emoji = "👤",
                     colorHex = "#FF1877F2",
-                    downloaderUrl = "https://fdown.net",
+                    downloaderUrl = "https://en1.savefrom.net/1-youtube-video-downloader-22wW/",
                     isDefault = true,
                     sortOrder = 1
                 ),
@@ -42,6 +42,22 @@ class PlatformRepository(private val dao: PlatformDao) {
                     downloaderUrl = "https://ssstwitter.com",
                     isDefault = true,
                     sortOrder = 2
+                ),
+                Platform(
+                    name = "Instagram",
+                    emoji = "📸",
+                    colorHex = "#FFE1306C",
+                    downloaderUrl = "https://en1.savefrom.net/15xA/download-from-instagram",
+                    isDefault = true,
+                    sortOrder = 3
+                ),
+                Platform(
+                    name = "YouTube",
+                    emoji = "▶️",
+                    colorHex = "#FFFF0000",
+                    downloaderUrl = "https://en1.savefrom.net/1-youtube-video-downloader-22wW/",
+                    isDefault = true,
+                    sortOrder = 4
                 )
             )
             defaults.forEach { dao.insert(it) }

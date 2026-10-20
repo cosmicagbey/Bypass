@@ -2,13 +2,9 @@ package com.bypass.app.service
 
 import android.animation.ValueAnimator
 import android.app.*
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.graphics.Color
 import android.graphics.PixelFormat
-import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
 import android.view.*
@@ -22,8 +18,7 @@ import com.bypass.app.MainActivity
 import com.bypass.app.R
 import com.bypass.app.data.Platform
 import com.bypass.app.data.PlatformRepository
-import com.bypass.app.download.BackgroundDownloadManager
-import com.bypass.app.ui.ClipboardCaptureActivity
+// BackgroundDownloadManager and ClipboardCaptureActivity kept in codebase but unused here
 import com.bypass.app.ui.WebViewActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -399,19 +394,10 @@ class FloatingBubbleService : Service() {
                     .setDuration(90)
                     .withEndAction {
                         closePickerWithAnimation {
-                            triggerBackgroundDownload(platform)
+                            launchWebView(platform)
                         }
                     }
                     .start()
-            }
-
-            // Long-click allows opening mini-browser manually if desired
-            btn.setOnLongClickListener {
-                btn.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                closePickerWithAnimation {
-                    launchWebView(platform)
-                }
-                true
             }
 
             container.addView(btn)
@@ -515,70 +501,14 @@ class FloatingBubbleService : Service() {
     }
 
     // -----------------------------------------------------------------------
-    // Background Download Execution
-    // -----------------------------------------------------------------------
-
-    private fun triggerBackgroundDownload(platform: Platform) {
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clipData = try { clipboard.primaryClip } catch (_: Exception) { null }
-        val directText = if (clipData != null && clipData.itemCount > 0) {
-            clipData.getItemAt(0)?.text?.toString() ?: ""
-        } else {
-            ""
-        }
-
-        val directUrl = BackgroundDownloadManager.extractUrl(directText)
-        if (directUrl.isNotBlank()) {
-            serviceScope.launch {
-                BackgroundDownloadManager.startDownload(
-                    context = this@FloatingBubbleService,
-                    platform = platform,
-                    rawClipboardText = directUrl,
-                    onFallbackToBrowser = {
-                        launchWebView(platform, directUrl)
-                    }
-                )
-            }
-        } else {
-            // Android 10+ background restriction: capture clipboard with 1-frame transparent activity
-            ClipboardCaptureActivity.capture(this) { capturedText ->
-                val cleanUrl = BackgroundDownloadManager.extractUrl(capturedText)
-                serviceScope.launch {
-                    BackgroundDownloadManager.startDownload(
-                        context = this@FloatingBubbleService,
-                        platform = platform,
-                        rawClipboardText = cleanUrl,
-                        onFallbackToBrowser = {
-                            launchWebView(platform, cleanUrl)
-                        }
-                    )
-                }
-            }
-        }
-    }
-
-    // -----------------------------------------------------------------------
     // Launch WebView
     // -----------------------------------------------------------------------
 
-    private fun launchWebView(platform: Platform, prefilledUrl: String = "") {
-        val finalUrl = if (prefilledUrl.isNotBlank()) {
-            prefilledUrl
-        } else {
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            val clipData = try { clipboard.primaryClip } catch (_: Exception) { null }
-            if (clipData != null && clipData.itemCount > 0) {
-                BackgroundDownloadManager.extractUrl(clipData.getItemAt(0)?.text?.toString() ?: "")
-            } else {
-                ""
-            }
-        }
-
+    private fun launchWebView(platform: Platform) {
         val intent = Intent(this, WebViewActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
             putExtra(WebViewActivity.EXTRA_URL, platform.downloaderUrl)
             putExtra(WebViewActivity.EXTRA_PLATFORM_NAME, platform.name)
-            putExtra(WebViewActivity.EXTRA_CLIPBOARD_URL, finalUrl)
         }
         startActivity(intent)
     }
