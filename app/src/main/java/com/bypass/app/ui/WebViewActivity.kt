@@ -2,43 +2,33 @@ package com.bypass.app.ui
 
 import android.annotation.SuppressLint
 import android.app.DownloadManager
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.content.BroadcastReceiver
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.os.Message
 import android.view.View
 import android.webkit.*
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.core.app.NotificationCompat
 import com.bypass.app.R
 
 /**
  * A bottom-sheet style Activity hosting a mini WebView.
- * It loads the downloader URL and, once the page is ready, injects
- * the clipboard URL into the first visible text input on the page.
  *
- * Key behaviors:
- * - Handles window.open() popups from download sites (loads them in same WebView)
- * - Blocks common ad/tracker redirects
- * - Downloads via Android DownloadManager
- * - Auto-closes after download starts
- * - Sends a notification when download completes
- *
- * Runs in its own task (taskAffinity) so dismissing it never brings
- * the main Bypass app to the foreground.
+ * Key features:
+ * 1. Automatically enters clipboard URL into the downloader input.
+ * 2. Injects a capture-phase JavaScript hook that intercepts download button clicks,
+ *    killing aggressive ad popups/popunders before they can fire.
+ * 3. Bridges directly to native Android DownloadManager via JavascriptInterface.
+ * 4. Filters out third-party ad redirects (like Google ads or shady ad networks).
+ * 5. Closes automatically once download is confirmed, returning the user to their app.
+ * 6. Background DownloadReceiver notifies the user when the download finishes.
  */
 class WebViewActivity : ComponentActivity() {
 
@@ -46,34 +36,27 @@ class WebViewActivity : ComponentActivity() {
         const val EXTRA_URL = "extra_url"
         const val EXTRA_PLATFORM_NAME = "extra_platform_name"
         const val EXTRA_CLIPBOARD_URL = "extra_clipboard_url"
-        private const val DOWNLOAD_CHANNEL_ID = "bypass_download_channel"
-        private const val DOWNLOAD_NOTIF_ID = 500
     }
 
     private lateinit var webView: WebView
     private var baseUrl: String = ""
-    private var pendingDownloadId: Long = -1L
+    private var isDownloadEnqueued: Boolean = false
 
-    // Broadcast receiver that fires when DownloadManager finishes a download
-    private val downloadCompleteReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
-            if (id == pendingDownloadId && id != -1L) {
-                val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                val query = DownloadManager.Query().setFilterById(id)
-                val cursor = dm.query(query)
-                if (cursor != null && cursor.moveToFirst()) {
-                    val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
-                    val titleIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
-                    val status = if (statusIdx >= 0) cursor.getInt(statusIdx) else -1
-                    val title = if (titleIdx >= 0) cursor.getString(titleIdx) else "Video"
-                    cursor.close()
-
-                    if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                        showDownloadCompleteNotification(title)
-                    }
-                }
-                pendingDownloadId = -1L
+    /**
+     * JS interface exposed to the WebView page as `window.AndroidDownloader`.
+     */
+    inner class DownloaderJsInterface {
+        @JavascriptInterface
+        fun onDownloadTriggered(downloadUrl: String?, title: String?) {
+            if (downloadUrl.isNullOrBlank()) return
+            runOnUiThread {
+                enqueueDownload(
+                    downloadUrl = downloadUrl,
+                    userAgent = webView.settings.userAgentString,
+                    contentDisposition = "",
+                    mimeType = "video/mp4",
+                    suggestedTitle = title
+                )
             }
         }
     }
@@ -86,26 +69,13 @@ class WebViewActivity : ComponentActivity() {
         baseUrl = intent.getStringExtra(EXTRA_URL) ?: run { finish(); return }
         val platformName = intent.getStringExtra(EXTRA_PLATFORM_NAME) ?: "Downloader"
 
-        // Read clipboard URL: prefer the intent extra (if provided), otherwise read clipboard
-        // directly. Since this is a focused Activity, clipboard access works on Android 10+.
         val clipboardUrl = intent.getStringExtra(EXTRA_CLIPBOARD_URL)?.takeIf { it.isNotBlank() }
             ?: readClipboardUrl()
-
-        // Create notification channel for download-complete alerts
-        createDownloadNotificationChannel()
-
-        // Register for download completion broadcasts
-        val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(downloadCompleteReceiver, filter, RECEIVER_EXPORTED)
-        } else {
-            registerReceiver(downloadCompleteReceiver, filter)
-        }
 
         // Dim background tap dismisses bottom sheet
         findViewById<View>(R.id.dim_background).setOnClickListener { finish() }
 
-        // Toolbar
+        // Toolbar controls
         findViewById<TextView>(R.id.tv_platform_title).text = platformName
         findViewById<ImageButton>(R.id.btn_close).setOnClickListener { finish() }
         findViewById<ImageButton>(R.id.btn_refresh).setOnClickListener { webView.reload() }
@@ -118,7 +88,7 @@ class WebViewActivity : ComponentActivity() {
             }
         }
 
-        // WebView setup
+        // Setup WebView
         webView = findViewById(R.id.web_view)
         val cookieManager = CookieManager.getInstance()
         cookieManager.setAcceptCookie(true)
@@ -134,71 +104,41 @@ class WebViewActivity : ComponentActivity() {
             builtInZoomControls = true
             displayZoomControls = false
             mediaPlaybackRequiresUserGesture = false
-            javaScriptCanOpenWindowsAutomatically = true
-            setSupportMultipleWindows(true)
+
+            // BLOCK POPUPS: do not allow new popup windows or automatic popups.
+            // All interactions stay contained within our WebView!
+            javaScriptCanOpenWindowsAutomatically = false
+            setSupportMultipleWindows(false)
+
             userAgentString = "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         }
 
-        // Download handling via Android DownloadManager
+        // Bridge JavaScript directly to native Android
+        webView.addJavascriptInterface(DownloaderJsInterface(), "AndroidDownloader")
+
+        // Download handling when WebView signals a downloadable file
         webView.setDownloadListener { downloadUrl, userAgent, contentDisposition, mimeType, _ ->
-            enqueueDownload(downloadUrl, userAgent, contentDisposition, mimeType)
+            enqueueDownload(downloadUrl, userAgent, contentDisposition, mimeType, null)
         }
 
-        // Handle window.open() popups — savefrom.net download buttons use these.
-        // We load the popup URL in the same WebView instead of opening a new browser.
         webView.webChromeClient = object : WebChromeClient() {
+            // Keep everything in a single view — refuse popup windows
             override fun onCreateWindow(
-                view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message
-            ): Boolean {
-                // Extract the URL the site is trying to open in a new window
-                val transport = resultMsg.obj as? WebView.WebViewTransport
-
-                // Create a temporary invisible WebView to capture the target URL
-                val tempWebView = WebView(this@WebViewActivity)
-                tempWebView.webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(
-                        v: WebView, request: WebResourceRequest
-                    ): Boolean {
-                        val targetUrl = request.url.toString()
-
-                        // Block known ad/tracker domains — don't navigate there
-                        if (isAdUrl(targetUrl)) {
-                            return true
-                        }
-
-                        // If it looks like a downloadable file link, trigger download directly
-                        if (isLikelyDownloadUrl(targetUrl)) {
-                            enqueueDownload(
-                                targetUrl,
-                                webView.settings.userAgentString,
-                                "",
-                                "video/mp4"
-                            )
-                            return true
-                        }
-
-                        // Otherwise load it in our main WebView (e.g. savefrom download page)
-                        webView.loadUrl(targetUrl)
-                        return true
-                    }
-                }
-
-                transport?.webView = tempWebView
-                resultMsg.sendToTarget()
-                return true
-            }
-
-            override fun onCloseWindow(window: WebView?) {
-                // Popup closed itself; ignore
-            }
+                view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?
+            ): Boolean = false
         }
 
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, pageUrl: String) {
                 super.onPageFinished(view, pageUrl)
+
+                // Inject clipboard URL
                 if (clipboardUrl.isNotBlank()) {
                     injectUrl(clipboardUrl)
                 }
+
+                // Inject ad blocker & download button interceptor
+                injectAdBlockAndDownloadHook()
             }
 
             override fun shouldOverrideUrlLoading(
@@ -207,59 +147,66 @@ class WebViewActivity : ComponentActivity() {
                 val targetUrl = request.url.toString()
                 val scheme = request.url.scheme?.lowercase() ?: ""
 
-                // Block ad/tracker redirects
+                // 1. If it's a media/download URL, intercept and start download!
+                if (isLikelyDownloadUrl(targetUrl)) {
+                    enqueueDownload(targetUrl, webView.settings.userAgentString, "", "video/mp4", null)
+                    return true
+                }
+
+                // 2. Block known ads & trackers
                 if (isAdUrl(targetUrl)) {
                     return true
                 }
 
-                // Direct download links — intercept and download
-                if (isLikelyDownloadUrl(targetUrl)) {
-                    enqueueDownload(
-                        targetUrl,
-                        webView.settings.userAgentString,
-                        "",
-                        "video/mp4"
-                    )
+                // 3. Block deep links (market://, intent://, etc.) from opening external app stores
+                if (scheme != "http" && scheme != "https") {
                     return true
                 }
 
-                return if (scheme == "http" || scheme == "https") {
-                    false // let WebView handle normal navigation
-                } else {
-                    // intent://, market://, etc — open externally
-                    try {
-                        startActivity(Intent(Intent.ACTION_VIEW, request.url))
-                    } catch (_: Exception) {}
-                    true
+                // 4. Allow legitimate navigation on the downloader website
+                if (isAllowedSite(targetUrl, baseUrl)) {
+                    return false
                 }
+
+                // 5. Block external third-party redirects (Google ads, ad networks)
+                // This keeps the user on the download page and stops the "Google site" popup!
+                return true
             }
         }
 
         webView.loadUrl(baseUrl)
     }
 
-    override fun onDestroy() {
-        try {
-            unregisterReceiver(downloadCompleteReceiver)
-        } catch (_: Exception) {}
-        super.onDestroy()
-    }
-
     // -----------------------------------------------------------------------
-    // Download helpers
+    // Native Download Enqueue
     // -----------------------------------------------------------------------
 
-    private fun enqueueDownload(
+    fun enqueueDownload(
         downloadUrl: String,
         userAgent: String,
         contentDisposition: String,
-        mimeType: String
+        mimeType: String,
+        suggestedTitle: String?
     ) {
+        if (isDownloadEnqueued) return
+        isDownloadEnqueued = true
+
         try {
-            val fileName = URLUtil.guessFileName(downloadUrl, contentDisposition, mimeType)
+            var fileName = suggestedTitle?.trim() ?: ""
+            if (fileName.isBlank() || fileName.equals("Video", ignoreCase = true)) {
+                fileName = URLUtil.guessFileName(downloadUrl, contentDisposition, mimeType)
+            }
+            // Clean illegal file characters
+            fileName = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
+            if (!fileName.endsWith(".mp4", ignoreCase = true) && !fileName.contains(".")) {
+                fileName += ".mp4"
+            }
+
             val request = DownloadManager.Request(Uri.parse(downloadUrl)).apply {
-                setMimeType(mimeType)
-                addRequestHeader("User-Agent", userAgent)
+                setMimeType(if (mimeType.isNotBlank()) mimeType else "video/mp4")
+                if (userAgent.isNotBlank()) {
+                    addRequestHeader("User-Agent", userAgent)
+                }
                 val cookies = CookieManager.getInstance().getCookie(downloadUrl)
                 if (cookies != null) {
                     addRequestHeader("Cookie", cookies)
@@ -270,13 +217,18 @@ class WebViewActivity : ComponentActivity() {
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
             }
+
             val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            pendingDownloadId = downloadManager.enqueue(request)
+            downloadManager.enqueue(request)
+
             Toast.makeText(this, "⬇️ Download started: $fileName", Toast.LENGTH_SHORT).show()
 
-            // Auto-close the mini browser so user returns to their previous app
-            Handler(Looper.getMainLooper()).postDelayed({ finish() }, 1500)
+            // Close the mini-browser so user can immediately continue what they were doing!
+            Handler(Looper.getMainLooper()).postDelayed({
+                finish()
+            }, 800)
         } catch (e: Exception) {
+            isDownloadEnqueued = false
             try {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl)))
             } catch (ex: Exception) {
@@ -285,9 +237,45 @@ class WebViewActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Returns true for common ad/tracker domains that should be blocked.
-     */
+    // -----------------------------------------------------------------------
+    // Domain & URL Filters
+    // -----------------------------------------------------------------------
+
+    private fun isAllowedSite(url: String, currentBaseUrl: String): Boolean {
+        val baseHost = try { Uri.parse(currentBaseUrl).host?.lowercase()?.removePrefix("www.") ?: "" } catch (_: Exception) { "" }
+        val targetHost = try { Uri.parse(url).host?.lowercase()?.removePrefix("www.") ?: "" } catch (_: Exception) { "" }
+        if (targetHost.isEmpty() || baseHost.isEmpty()) return false
+
+        // Match base domain or known subdomains/workers
+        return targetHost.endsWith(baseHost) ||
+               baseHost.endsWith(targetHost) ||
+               targetHost.contains("savefrom") ||
+               targetHost.contains("ssstwitter")
+    }
+
+    private fun isLikelyDownloadUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        if (lower.startsWith("data:") || lower.startsWith("javascript:")) return false
+
+        val downloadExtensions = listOf(
+            ".mp4", ".mp3", ".webm", ".mkv", ".avi", ".mov",
+            ".m4a", ".m4v", ".3gp", ".flv", ".wmv", ".aac", ".ts"
+        )
+        val uri = try { Uri.parse(lower) } catch (_: Exception) { null }
+        val path = uri?.path ?: ""
+        if (downloadExtensions.any { path.endsWith(it) || lower.contains(it) }) return true
+
+        if (lower.contains("mime=video") || lower.contains("mime=audio")) return true
+        if (lower.contains("videoplayback") || lower.contains("googlevideo.com")) return true
+        if (lower.contains("savefrom.net/redirect")) return true
+        if (lower.contains("dl=1") || lower.contains("download=1") || lower.contains("download=true")) return true
+        if (lower.contains("fbcdn.net") && (lower.contains("video") || lower.contains(".mp4") || lower.contains("bytestart"))) return true
+        if (lower.contains("tiktokcdn.com") || lower.contains("cdninstagram.com")) return true
+        if (lower.contains("video.twimg.com")) return true
+
+        return false
+    }
+
     private fun isAdUrl(url: String): Boolean {
         val adDomains = listOf(
             "doubleclick.net", "googlesyndication.com", "googleadservices.com",
@@ -297,54 +285,86 @@ class WebViewActivity : ComponentActivity() {
             "trafficjunky.com", "exoclick.com", "juicyads.com",
             "clickadu.com", "hilltopads.net", "adsterra.com",
             "pushground.com", "richpush.co", "megapush.com",
-            "ad.plus", "bidvertiser.com"
+            "ad.plus", "bidvertiser.com", "adkeeper.co", "mgid.com"
         )
         val lower = url.lowercase()
         return adDomains.any { lower.contains(it) }
     }
 
+    // -----------------------------------------------------------------------
+    // JavaScript Hooks & Ad Blocker
+    // -----------------------------------------------------------------------
+
     /**
-     * Returns true if the URL looks like a direct media/file download.
+     * Injects client-side scripts that:
+     * 1. Neutralize `window.open` so popup ads cannot launch.
+     * 2. Intercept download button clicks during the CAPTURE phase,
+     *    cancelling ad scripts from firing and sending the video link straight
+     *    to Android's DownloadManager!
      */
-    private fun isLikelyDownloadUrl(url: String): Boolean {
-        val lower = url.lowercase()
-        val downloadExtensions = listOf(
-            ".mp4", ".mp3", ".webm", ".mkv", ".avi", ".mov",
-            ".m4a", ".m4v", ".3gp", ".flv", ".wmv", ".aac"
-        )
-        // Check file extension (strip query params)
-        val path = Uri.parse(lower).path ?: ""
-        if (downloadExtensions.any { path.endsWith(it) }) return true
-        // Check query params for common download indicators
-        if (lower.contains("mime=video") || lower.contains("mime=audio")) return true
-        if (lower.contains("dl=1") || lower.contains("download=1")) return true
-        return false
+    private fun injectAdBlockAndDownloadHook() {
+        val hookJs = """
+            (function() {
+                if (window.__bypass_hooked) return;
+                window.__bypass_hooked = true;
+
+                // 1. Block popup ads
+                window.open = function(url) {
+                    if (url && (url.indexOf('.mp4') !== -1 || url.indexOf('videoplayback') !== -1 || url.indexOf('savefrom.net/redirect') !== -1)) {
+                        if (window.AndroidDownloader) {
+                            window.AndroidDownloader.onDownloadTriggered(url, '');
+                        }
+                    }
+                    return null;
+                };
+
+                // 2. Capture clicks on download links/buttons BEFORE site ad listeners run
+                document.addEventListener('click', function(e) {
+                    var el = e.target;
+                    while (el && el.tagName !== 'A' && el !== document.body) {
+                        el = el.parentElement;
+                    }
+                    if (el && el.tagName === 'A') {
+                        var href = el.getAttribute('href') || el.href || '';
+                        var hasDownload = el.hasAttribute('download');
+                        var className = el.className || '';
+                        var isDownloadBtn = hasDownload ||
+                            className.indexOf('download-icon') !== -1 ||
+                            className.indexOf('link-download') !== -1 ||
+                            className.indexOf('def-btn-box') !== -1 ||
+                            className.indexOf('sf-dump') !== -1 ||
+                            href.indexOf('.mp4') !== -1 ||
+                            href.indexOf('videoplayback') !== -1 ||
+                            href.indexOf('savefrom.net/redirect') !== -1 ||
+                            href.indexOf('dl=1') !== -1 ||
+                            href.indexOf('download=1') !== -1;
+
+                        if (isDownloadBtn && href && href.indexOf('javascript:') !== 0 && href.indexOf('#') !== 0) {
+                            // Stop ad popups from intercepting this click!
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+
+                            // Scrape video title if present
+                            var titleEl = document.querySelector('.title') ||
+                                          document.querySelector('.video-title') ||
+                                          document.querySelector('.row-title') ||
+                                          document.querySelector('.info-box .title') ||
+                                          document.querySelector('meta[property="og:title"]');
+                            var title = titleEl ? (titleEl.innerText || titleEl.getAttribute('content') || '') : '';
+                            var downloadAttr = el.getAttribute('download') || '';
+
+                            if (window.AndroidDownloader) {
+                                window.AndroidDownloader.onDownloadTriggered(href, downloadAttr || title);
+                            }
+                            return false;
+                        }
+                    }
+                }, true); // true = capture phase!
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(hookJs, null)
     }
-
-    // -----------------------------------------------------------------------
-    // Clipboard helpers
-    // -----------------------------------------------------------------------
-
-    private fun readClipboardUrl(): String {
-        return try {
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            val clipData = clipboard.primaryClip
-            if (clipData != null && clipData.itemCount > 0) {
-                val text = clipData.getItemAt(0)?.text?.toString() ?: ""
-                extractUrl(text)
-            } else ""
-        } catch (_: Exception) { "" }
-    }
-
-    private fun extractUrl(text: String): String {
-        if (text.isBlank()) return ""
-        val regex = Regex("https?://[^\\s\"'<>]+")
-        return regex.find(text)?.value ?: ""
-    }
-
-    // -----------------------------------------------------------------------
-    // URL injection
-    // -----------------------------------------------------------------------
 
     private fun injectUrl(videoUrl: String) {
         val escaped = videoUrl
@@ -367,6 +387,14 @@ class WebViewActivity : ComponentActivity() {
                         el.dispatchEvent(new Event('input', { bubbles: true }));
                         el.dispatchEvent(new Event('change', { bubbles: true }));
                         el.dispatchEvent(new Event('keyup', { bubbles: true }));
+
+                        // If there is an adjacent submit button, tap it
+                        var submitBtn = document.querySelector('#sf_submit') ||
+                                        document.querySelector('button[type="submit"]') ||
+                                        document.querySelector('.btn-download');
+                        if (submitBtn) {
+                            submitBtn.click();
+                        }
                         break;
                     }
                 }
@@ -376,43 +404,19 @@ class WebViewActivity : ComponentActivity() {
     }
 
     // -----------------------------------------------------------------------
-    // Download-complete notification
+    // Clipboard helper
     // -----------------------------------------------------------------------
 
-    private fun createDownloadNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                DOWNLOAD_CHANNEL_ID,
-                "Download Complete",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Notifies when a video download finishes"
-            }
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-        }
-    }
-
-    private fun showDownloadCompleteNotification(fileName: String) {
-        // Open Downloads folder when notification is tapped
-        val openIntent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        val pendingIntent = android.app.PendingIntent.getActivity(
-            this, 0, openIntent,
-            android.app.PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(this, DOWNLOAD_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_bubble_notification)
-            .setContentTitle("✅ Download Complete")
-            .setContentText(fileName)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(pendingIntent)
-            .build()
-
-        getSystemService(NotificationManager::class.java)
-            .notify(DOWNLOAD_NOTIF_ID, notification)
+    private fun readClipboardUrl(): String {
+        return try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clipData = clipboard.primaryClip
+            if (clipData != null && clipData.itemCount > 0) {
+                val text = clipData.getItemAt(0)?.text?.toString() ?: ""
+                val regex = Regex("https?://[^\\s\"'<>]+")
+                regex.find(text)?.value ?: ""
+            } else ""
+        } catch (_: Exception) { "" }
     }
 
     // -----------------------------------------------------------------------

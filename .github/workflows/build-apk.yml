@@ -61,13 +61,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "Bypass v1.0.6 (Latest APK)"
+          name: "Bypass v1.0.7 (Latest APK)"
           body: |
-            ### ⚡ Bypass Android APK v1.0.6
-            - **Reliable Mini-Browser Download:** Tapping a platform icon opens the mini bottom-sheet browser which can reliably read your clipboard on all Android versions.
-            - **Radial Fan-out Menu & Real Brand Logos:** Beautiful blooming arc with official **X (Twitter)**, **TikTok**, **Facebook**, **Instagram**, and **YouTube** logos.
-            - **Compact Floating Bubble:** 44dp edge-snapping bubble stays out of the way.
-            - **Background Persistence:** Bubble survives app swipe-away from Recents.
+            ### ⚡ Bypass Android APK v1.0.7
+            - **Ad & Redirect Killer:** Neutralizes aggressive popups (`window.open`) and blocks third-party ad redirects (no more Google site popups!).
+            - **Capture-Phase Download Interceptor:** Captures download button taps before the website's ad scripts can execute, routing directly to Android's DownloadManager.
+            - **Auto-Closing Mini-Browser:** Closes the mini-browser automatically ~800ms after download starts so you can continue using your app immediately.
+            - **Background Download Notifications:** Persistent `DownloadReceiver` notifies you when your video finishes downloading, with direct tap-to-watch access.
+            - **Radial Fan-out Menu & Real Brand Logos:** Blooming arc with official **X (Twitter)**, **TikTok**, **Facebook**, **Instagram**, and **YouTube** logos.
             - **Direct APK Download:** Tap **`Bypass.apk`** below to download and install.
           files: build-output/Bypass.apk
           prerelease: false
