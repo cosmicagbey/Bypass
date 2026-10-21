@@ -202,6 +202,21 @@ class WebViewActivity : ComponentActivity() {
                 fileName += ".mp4"
             }
 
+            // Save to Movies/Bypass so Gallery apps immediately index into the "Bypass" video album
+            val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+            val bypassDir = java.io.File(moviesDir, "Bypass")
+            try {
+                if (!bypassDir.exists()) {
+                    bypassDir.mkdirs()
+                }
+            } catch (_: Exception) {}
+
+            val destinationSubPath = if (bypassDir.exists() || bypassDir.isDirectory) {
+                "Bypass/$fileName"
+            } else {
+                fileName
+            }
+
             val request = DownloadManager.Request(Uri.parse(downloadUrl)).apply {
                 setMimeType(if (mimeType.isNotBlank()) mimeType else "video/mp4")
                 if (userAgent.isNotBlank()) {
@@ -215,7 +230,9 @@ class WebViewActivity : ComponentActivity() {
                 setDescription("Downloading via Bypass...")
                 setTitle(fileName)
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                @Suppress("DEPRECATION")
+                allowScanningByMediaScanner()
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_MOVIES, destinationSubPath)
             }
 
             val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager

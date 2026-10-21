@@ -5,16 +5,25 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import com.bypass.app.R
+import java.io.File
 
 /**
  * Manifest-registered broadcast receiver that listens for DownloadManager completions.
  * Survives even after WebViewActivity or FloatingBubbleService are closed or dismissed.
+ *
+ * Automatically scans downloaded videos into Android's MediaStore so they
+ * immediately appear in the user's Gallery (Google Photos, Samsung Gallery, etc.)
+ * under the "Bypass" / "Movies" album and the main Videos timeline.
  */
 class DownloadReceiver : BroadcastReceiver() {
 
@@ -49,7 +58,18 @@ class DownloadReceiver : BroadcastReceiver() {
                 if (desc != "Downloading via Bypass...") return
 
                 if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                    showCompletionNotification(context, title, localUriStr)
+                    // 1. Force index into Android MediaStore so it appears in the phone's Gallery
+                    indexIntoGallery(context, title, localUriStr)
+
+                    // 2. Obtain a safe content URI for opening the video
+                    val contentUri = try {
+                        dm.getUriForDownloadedFile(downloadId)
+                    } catch (_: Exception) {
+                        null
+                    }
+
+                    // 3. Show high-priority completion notification
+                    showCompletionNotification(context, title, contentUri, localUriStr)
                 }
             }
         } catch (_: Exception) {
@@ -58,7 +78,96 @@ class DownloadReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun showCompletionNotification(context: Context, title: String, localUriStr: String?) {
+    /**
+     * Scans the downloaded video file into MediaStore so it immediately
+     * shows up in the user's Gallery app under Movies/Bypass.
+     */
+    private fun indexIntoGallery(context: Context, title: String, localUriStr: String?) {
+        try {
+            val candidatePaths = mutableListOf<String>()
+
+            // Try local URI path if available
+            if (!localUriStr.isNullOrBlank()) {
+                val uri = Uri.parse(localUriStr)
+                if (uri.scheme == "file") {
+                    uri.path?.let { candidatePaths.add(it) }
+                }
+            }
+
+            // Check primary Movies/Bypass directory
+            val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+            val bypassFile = File(moviesDir, "Bypass/$title")
+            if (bypassFile.exists()) {
+                candidatePaths.add(bypassFile.absolutePath)
+            }
+            val directMovieFile = File(moviesDir, title)
+            if (directMovieFile.exists()) {
+                candidatePaths.add(directMovieFile.absolutePath)
+            }
+
+            // Check Downloads directory fallback
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val downloadFile = File(downloadsDir, title)
+            if (downloadFile.exists()) {
+                candidatePaths.add(downloadFile.absolutePath)
+            }
+
+            val validFiles = candidatePaths.distinct().map { File(it) }.filter { it.exists() && it.length() > 0 }
+
+            if (validFiles.isNotEmpty()) {
+                val paths = validFiles.map { it.absolutePath }.toTypedArray()
+                val mimeTypes = Array(paths.size) { "video/mp4" }
+
+                // 1. MediaScannerConnection (canonical API across all Android versions)
+                MediaScannerConnection.scanFile(
+                    context.applicationContext,
+                    paths,
+                    mimeTypes
+                ) { _, _ -> }
+
+                // 2. Broadcast media scanner intent
+                validFiles.forEach { file ->
+                    try {
+                        val scanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(file))
+                        context.sendBroadcast(scanIntent)
+                    } catch (_: Exception) {}
+                }
+
+                // 3. MediaStore API insertion for Android 10+ (Q+)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val target = validFiles.first()
+                    try {
+                        val resolver = context.contentResolver
+                        val projection = arrayOf(MediaStore.Video.Media._ID)
+                        val selection = "${MediaStore.Video.Media.DISPLAY_NAME} = ?"
+                        val selectionArgs = arrayOf(target.name)
+                        val exists = resolver.query(
+                            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                            projection, selection, selectionArgs, null
+                        )?.use { it.count > 0 } ?: false
+
+                        if (!exists) {
+                            val values = ContentValues().apply {
+                                put(MediaStore.Video.Media.DISPLAY_NAME, target.name)
+                                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                                put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/Bypass")
+                                put(MediaStore.Video.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
+                                put(MediaStore.Video.Media.DATE_MODIFIED, target.lastModified() / 1000)
+                            }
+                            resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun showCompletionNotification(
+        context: Context,
+        title: String,
+        contentUri: Uri?,
+        localUriStr: String?
+    ) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -73,16 +182,26 @@ class DownloadReceiver : BroadcastReceiver() {
             nm.createNotificationChannel(channel)
         }
 
-        // Tapping notification opens the downloaded video file or Downloads folder
-        val openIntent = if (!localUriStr.isNullOrBlank()) {
-            val fileUri = Uri.parse(localUriStr)
-            Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(fileUri, "video/*")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // Tapping notification opens the downloaded video file or Gallery
+        val openIntent = when {
+            contentUri != null -> {
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(contentUri, "video/*")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
             }
-        } else {
-            Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            !localUriStr.isNullOrBlank() -> {
+                val fileUri = Uri.parse(localUriStr)
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(fileUri, "video/*")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            }
+            else -> {
+                Intent(Intent.ACTION_VIEW).apply {
+                    type = "video/*"
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
             }
         }
 

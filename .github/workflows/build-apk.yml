@@ -61,13 +61,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "Bypass v1.0.7 (Latest APK)"
+          name: "Bypass v1.0.8 (Latest APK)"
           body: |
-            ### ⚡ Bypass Android APK v1.0.7
-            - **Ad & Redirect Killer:** Neutralizes aggressive popups (`window.open`) and blocks third-party ad redirects (no more Google site popups!).
-            - **Capture-Phase Download Interceptor:** Captures download button taps before the website's ad scripts can execute, routing directly to Android's DownloadManager.
-            - **Auto-Closing Mini-Browser:** Closes the mini-browser automatically ~800ms after download starts so you can continue using your app immediately.
-            - **Background Download Notifications:** Persistent `DownloadReceiver` notifies you when your video finishes downloading, with direct tap-to-watch access.
+            ### ⚡ Bypass Android APK v1.0.8
+            - **Edge Docking & Idle Dimming:** Floating icon now rests flush against the edge of the screen (0px gap). After 2.5s of inactivity, it tucks ~50% of its body behind the bezel and dims down. Tapping it smoothly restores full color and pops it out.
+            - **Instant Gallery Visibility:** Downloaded videos now save to `Movies/Bypass/` and are automatically scanned into Android's `MediaStore`. They now appear immediately in your phone's Gallery, Google Photos, Samsung Gallery, and under the dedicated "Bypass" album.
+            - **Ad & Redirect Killer:** Neutralizes aggressive popups (`window.open`) and blocks third-party ad redirects.
+            - **Capture-Phase Download Interceptor:** Captures download taps before ad scripts can run, routing straight to Android's DownloadManager.
+            - **Auto-Closing Mini-Browser:** Closes the mini-browser automatically ~800ms after download starts.
+            - **Background Notifications:** Persistent `DownloadReceiver` notifies you when your video finishes downloading, with direct tap-to-watch access.
             - **Radial Fan-out Menu & Real Brand Logos:** Blooming arc with official **X (Twitter)**, **TikTok**, **Facebook**, **Instagram**, and **YouTube** logos.
             - **Direct APK Download:** Tap **`Bypass.apk`** below to download and install.
           files: build-output/Bypass.apk

@@ -1,12 +1,16 @@
 package com.bypass.app.service
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.app.*
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.view.*
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -18,7 +22,6 @@ import com.bypass.app.MainActivity
 import com.bypass.app.R
 import com.bypass.app.data.Platform
 import com.bypass.app.data.PlatformRepository
-// BackgroundDownloadManager and ClipboardCaptureActivity kept in codebase but unused here
 import com.bypass.app.ui.WebViewActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -29,6 +32,8 @@ class FloatingBubbleService : Service() {
         const val CHANNEL_ID = "bypass_bubble_channel"
         const val NOTIF_ID = 101
         const val ACTION_STOP = "com.bypass.app.ACTION_STOP_SERVICE"
+        private const val IDLE_DELAY_MS = 2500L
+
         @Volatile
         var isRunning: Boolean = false
             private set
@@ -40,8 +45,15 @@ class FloatingBubbleService : Service() {
 
     private var isPickerOpen = false
     private var isPickerClosing = false
-    private var lastBubbleX = 24
+    private var lastBubbleX = 0
     private var lastBubbleY = 300
+
+    // Edge docking & idle dimming
+    private val idleHandler = Handler(Looper.getMainLooper())
+    private val idleRunnable = Runnable { dimAndTuckBubble() }
+    private var isDimmed = false
+    private var isDockedOnLeft = true
+    private var tuckAnimator: ValueAnimator? = null
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val repository by lazy { (application as BypassApp).repository }
@@ -77,10 +89,6 @@ class FloatingBubbleService : Service() {
         return START_STICKY
     }
 
-    /**
-     * Called when the main app activity is swiped away from Recents.
-     * We keep the foreground service and floating bubble alive!
-     */
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         if (isRunning) {
@@ -94,6 +102,8 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         isRunning = false
+        idleHandler.removeCallbacksAndMessages(null)
+        tuckAnimator?.cancel()
         serviceScope.cancel()
         removePickerInternal()
         removeBubble()
@@ -164,14 +174,15 @@ class FloatingBubbleService : Service() {
         val screenHeight = displayMetrics.heightPixels
         val bubbleSize = (44 * displayMetrics.density).toInt()
         val edgeMargin = (8 * displayMetrics.density).toInt()
-        val leftEdge = edgeMargin
-        val rightEdge = screenWidth - bubbleSize - edgeMargin
+
+        // Rest flush on the edge of the screen (0px gap)
+        val leftEdge = 0
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             getOverlayType(),
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -181,6 +192,8 @@ class FloatingBubbleService : Service() {
 
         lastBubbleX = params.x
         lastBubbleY = params.y
+        isDockedOnLeft = true
+        isDimmed = false
 
         // Drag & Click logic
         var initialX = 0
@@ -192,11 +205,16 @@ class FloatingBubbleService : Service() {
         view.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    cancelIdleTimer()
+                    tuckAnimator?.cancel()
                     initialX = params.x
                     initialY = params.y
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
                     isDragging = false
+
+                    // Immediate visual response: wake to full opacity
+                    view.alpha = 1.0f
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -207,6 +225,7 @@ class FloatingBubbleService : Service() {
                             closePickerWithAnimation()
                         }
                         isDragging = true
+                        isDimmed = false
                     }
                     if (isDragging) {
                         params.x = (initialX + dx).coerceIn(0, screenWidth - bubbleSize)
@@ -219,14 +238,12 @@ class FloatingBubbleService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (isDragging) {
-                        // Smoothly snap bubble to whichever side is closer (left or right)
-                        val targetX = if (params.x + bubbleSize / 2 < screenWidth / 2) {
-                            leftEdge
-                        } else {
-                            rightEdge
-                        }
+                        // Snap flush to whichever edge is closer (0 on left, screenWidth - bubbleSize on right)
+                        isDockedOnLeft = (params.x + bubbleSize / 2 < screenWidth / 2)
+                        val targetX = if (isDockedOnLeft) 0 else (screenWidth - bubbleSize)
 
-                        ValueAnimator.ofInt(params.x, targetX).apply {
+                        tuckAnimator?.cancel()
+                        tuckAnimator = ValueAnimator.ofInt(params.x, targetX).apply {
                             duration = 220
                             interpolator = DecelerateInterpolator(1.5f)
                             addUpdateListener { va ->
@@ -236,11 +253,19 @@ class FloatingBubbleService : Service() {
                                     windowManager.updateViewLayout(view, params)
                                 } catch (_: Exception) {}
                             }
+                            addListener(object : AnimatorListenerAdapter() {
+                                override fun onAnimationEnd(animation: Animator) {
+                                    scheduleIdleTimer()
+                                }
+                            })
                             start()
                         }
                     } else {
                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        togglePicker(params.x, params.y)
+                        // If tucked/dimmed, wake up & pop out smoothly, then toggle radial menu
+                        wakeAndUntuckBubble {
+                            togglePicker(params.x, params.y)
+                        }
                     }
                     true
                 }
@@ -251,10 +276,13 @@ class FloatingBubbleService : Service() {
         try {
             windowManager.addView(view, params)
             bubbleRoot = view
+            scheduleIdleTimer()
         } catch (_: Exception) {}
     }
 
     private fun removeBubble() {
+        idleHandler.removeCallbacksAndMessages(null)
+        tuckAnimator?.cancel()
         bubbleRoot?.let {
             try {
                 windowManager.removeView(it)
@@ -264,8 +292,119 @@ class FloatingBubbleService : Service() {
     }
 
     // -----------------------------------------------------------------------
+    // Idle Dimming & Edge Tucking
     // -----------------------------------------------------------------------
-    // Radial Platform Menu (Fanned Out Circle Around Bubble)
+
+    private fun scheduleIdleTimer() {
+        idleHandler.removeCallbacks(idleRunnable)
+        if (!isPickerOpen) {
+            idleHandler.postDelayed(idleRunnable, IDLE_DELAY_MS)
+        }
+    }
+
+    private fun cancelIdleTimer() {
+        idleHandler.removeCallbacks(idleRunnable)
+    }
+
+    /**
+     * Animates the bubble to hide ~48% of its body behind the screen bezel
+     * and dims its opacity to 0.4 when idle.
+     */
+    private fun dimAndTuckBubble() {
+        if (isPickerOpen || isDimmed || bubbleRoot == null) return
+        val view = bubbleRoot ?: return
+        val params = view.layoutParams as? WindowManager.LayoutParams ?: return
+
+        val displayMetrics = resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val bubbleSize = (44 * displayMetrics.density).toInt()
+        val tuckDistance = (bubbleSize * 0.48f).toInt()
+
+        val startX = params.x
+        val targetX = if (isDockedOnLeft) {
+            -tuckDistance
+        } else {
+            screenWidth - bubbleSize + tuckDistance
+        }
+
+        val startAlpha = view.alpha
+        val targetAlpha = 0.4f
+
+        tuckAnimator?.cancel()
+        tuckAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 320
+            interpolator = DecelerateInterpolator(1.5f)
+            addUpdateListener { va ->
+                val fraction = va.animatedFraction
+                params.x = (startX + (targetX - startX) * fraction).toInt()
+                lastBubbleX = params.x
+                view.alpha = startAlpha + (targetAlpha - startAlpha) * fraction
+                try {
+                    windowManager.updateViewLayout(view, params)
+                } catch (_: Exception) {}
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    isDimmed = true
+                }
+            })
+            start()
+        }
+    }
+
+    /**
+     * Smoothly restores full opacity and slides the full bubble back out from the screen edge.
+     */
+    private fun wakeAndUntuckBubble(onEnd: (() -> Unit)? = null) {
+        cancelIdleTimer()
+        val view = bubbleRoot ?: return
+        val params = view.layoutParams as? WindowManager.LayoutParams ?: return
+
+        val displayMetrics = resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val bubbleSize = (44 * displayMetrics.density).toInt()
+        val restX = if (isDockedOnLeft) 0 else (screenWidth - bubbleSize)
+
+        tuckAnimator?.cancel()
+
+        if (!isDimmed && params.x == restX && view.alpha >= 0.98f) {
+            onEnd?.invoke()
+            return
+        }
+
+        val startX = params.x
+        val startAlpha = view.alpha
+
+        tuckAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 180
+            interpolator = DecelerateInterpolator(1.5f)
+            addUpdateListener { va ->
+                val fraction = va.animatedFraction
+                params.x = (startX + (restX - startX) * fraction).toInt()
+                lastBubbleX = params.x
+                view.alpha = startAlpha + (1.0f - startAlpha) * fraction
+                try {
+                    windowManager.updateViewLayout(view, params)
+                } catch (_: Exception) {}
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    isDimmed = false
+                    params.x = restX
+                    lastBubbleX = restX
+                    view.alpha = 1.0f
+                    try {
+                        windowManager.updateViewLayout(view, params)
+                    } catch (_: Exception) {}
+                    onEnd?.invoke()
+                }
+            })
+            start()
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Radial Platform Menu
     // -----------------------------------------------------------------------
 
     private fun togglePicker(bubbleX: Int, bubbleY: Int) {
@@ -274,6 +413,7 @@ class FloatingBubbleService : Service() {
         if (isPickerOpen) {
             closePickerWithAnimation()
         } else {
+            cancelIdleTimer()
             serviceScope.launch {
                 val platforms = repository.enabledPlatforms.first()
                 openRadialMenuWithAnimation(platforms, bubbleX, bubbleY)
@@ -284,6 +424,7 @@ class FloatingBubbleService : Service() {
     private fun openRadialMenuWithAnimation(platforms: List<Platform>, bubbleX: Int, bubbleY: Int) {
         if (platforms.isEmpty()) {
             Toast.makeText(this, "No platforms enabled. Open Bypass settings to enable platforms.", Toast.LENGTH_LONG).show()
+            scheduleIdleTimer()
             return
         }
 
@@ -330,7 +471,6 @@ class FloatingBubbleService : Service() {
         val radius = 76 * density
         val count = platforms.size
 
-        // Calculate arc angles depending on which screen edge the bubble is resting on
         val angles = when (count) {
             1 -> if (isLeft) doubleArrayOf(0.0) else doubleArrayOf(180.0)
             2 -> if (isLeft) doubleArrayOf(-32.0, 32.0) else doubleArrayOf(148.0, 212.0)
@@ -344,7 +484,6 @@ class FloatingBubbleService : Service() {
             }
         }
 
-        // Tilt arc if bubble is near top or bottom screen boundary
         val tilt = when {
             centerY < 130 * density -> if (isLeft) 24.0 else -24.0
             centerY > screenHeight - (130 * density) -> if (isLeft) -24.0 else 24.0
@@ -354,11 +493,9 @@ class FloatingBubbleService : Service() {
         platforms.forEachIndexed { i, platform ->
             val btn = inflater.inflate(R.layout.item_radial_button, container, false) as androidx.cardview.widget.CardView
 
-            // Brand background color
             val brandColor = PlatformRepository.getPlatformBrandColor(platform.name, platform.colorHex)
             btn.setCardBackgroundColor(brandColor)
 
-            // Setup real-time brand icon or fallback emoji
             val iconRes = PlatformRepository.getPlatformIconRes(platform.name)
             val iconView = btn.findViewById<ImageView>(R.id.radial_button_icon)
             val emojiView = btn.findViewById<TextView>(R.id.radial_button_emoji)
@@ -373,7 +510,6 @@ class FloatingBubbleService : Service() {
                 iconView.visibility = View.GONE
             }
 
-            // Position initially centered at the bubble's center
             val lp = FrameLayout.LayoutParams(buttonSize, buttonSize).apply {
                 leftMargin = centerX - buttonSize / 2
                 topMargin = centerY - buttonSize / 2
@@ -402,13 +538,11 @@ class FloatingBubbleService : Service() {
 
             container.addView(btn)
 
-            // Calculate radial offset
             val angleDeg = angles[i] + tilt
             val rad = Math.toRadians(angleDeg)
             val deltaX = (radius * Math.cos(rad)).toFloat()
             val deltaY = (radius * Math.sin(rad)).toFloat()
 
-            // Smooth spring fan-out animation
             btn.animate()
                 .translationX(deltaX)
                 .translationY(deltaY)
@@ -439,12 +573,12 @@ class FloatingBubbleService : Service() {
     private fun closePickerWithAnimation(onEndAction: (() -> Unit)? = null) {
         if (isPickerClosing || pickerRoot == null) {
             onEndAction?.invoke()
+            scheduleIdleTimer()
             return
         }
 
         isPickerClosing = true
 
-        // Rotate bubble icon back to ⚡
         val bubbleIcon = bubbleRoot?.findViewById<TextView>(R.id.bubble_icon)
         bubbleIcon?.animate()
             ?.rotation(-90f)
@@ -464,6 +598,7 @@ class FloatingBubbleService : Service() {
         if (childCount == 0) {
             removePickerInternal()
             onEndAction?.invoke()
+            scheduleIdleTimer()
             return
         }
 
@@ -483,6 +618,7 @@ class FloatingBubbleService : Service() {
                     if (isLast) {
                         removePickerInternal()
                         onEndAction?.invoke()
+                        scheduleIdleTimer()
                     }
                 }
                 ?.start()
