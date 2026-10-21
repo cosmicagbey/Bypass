@@ -304,7 +304,7 @@ private fun PlatformListItem(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(brandColor),
+                    .background(Color(brandColor)),
                 contentAlignment = Alignment.Center
             ) {
                 if (iconRes != null) {
