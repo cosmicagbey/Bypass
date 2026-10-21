@@ -61,16 +61,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "Bypass v1.0.8 (Latest APK)"
+          name: "Bypass v1.0.9 (Latest APK)"
           body: |
-            ### ⚡ Bypass Android APK v1.0.8
-            - **Edge Docking & Idle Dimming:** Floating icon now rests flush against the edge of the screen (0px gap). After 2.5s of inactivity, it tucks ~50% of its body behind the bezel and dims down. Tapping it smoothly restores full color and pops it out.
-            - **Instant Gallery Visibility:** Downloaded videos now save to `Movies/Bypass/` and are automatically scanned into Android's `MediaStore`. They now appear immediately in your phone's Gallery, Google Photos, Samsung Gallery, and under the dedicated "Bypass" album.
-            - **Ad & Redirect Killer:** Neutralizes aggressive popups (`window.open`) and blocks third-party ad redirects.
-            - **Capture-Phase Download Interceptor:** Captures download taps before ad scripts can run, routing straight to Android's DownloadManager.
-            - **Auto-Closing Mini-Browser:** Closes the mini-browser automatically ~800ms after download starts.
-            - **Background Notifications:** Persistent `DownloadReceiver` notifies you when your video finishes downloading, with direct tap-to-watch access.
-            - **Radial Fan-out Menu & Real Brand Logos:** Blooming arc with official **X (Twitter)**, **TikTok**, **Facebook**, **Instagram**, and **YouTube** logos.
+            ### ⚡ Bypass Android APK v1.0.9
+            - **Twitter / X Video Download Fix:** Fixed 403 Forbidden downloads on `twittervideodownloader.com` by preventing third-party Referer headers from being sent to Twitter's CDN (`video.twimg.com`). Auto-fills and downloads X videos flawlessly.
+            - **Custom Save Location Setting:** New option in Settings allows users to select where videos are saved: `Movies / Bypass (Gallery - Recommended)`, `Downloads`, or `DCIM / Bypass`.
+            - **Storage & Gallery Permission Card:** Added explicit storage & media permission checks on Home and Settings screen to guarantee immediate gallery indexing.
+            - **Edge Docking & Idle Dimming:** Floating icon rests flush on screen edges (0px gap), tucks ~50% behind bezel after 2.5s, and dims down until tapped.
+            - **Instant Gallery Visibility:** Automatic `MediaStore` registration places videos right into your phone's Gallery under the "Bypass" album.
             - **Direct APK Download:** Tap **`Bypass.apk`** below to download and install.
           files: build-output/Bypass.apk
           prerelease: false

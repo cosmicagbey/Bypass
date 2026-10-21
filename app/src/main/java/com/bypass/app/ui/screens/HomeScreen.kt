@@ -29,8 +29,10 @@ fun HomeScreen(
     hasOverlayPermission: () -> Boolean,
     isServiceRunning: () -> Boolean,
     isBatteryOptimizationIgnored: () -> Boolean = { true },
+    hasStoragePermission: () -> Boolean = { true },
     onRequestOverlayPermission: () -> Unit,
     onRequestIgnoreBatteryOptimization: () -> Unit = {},
+    onRequestStoragePermission: () -> Unit = {},
     onToggleService: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     viewModel: MainViewModel = viewModel()
@@ -38,6 +40,7 @@ fun HomeScreen(
     val permissionGranted = hasOverlayPermission()
     val serviceRunning = isServiceRunning()
     val batteryOptimized = isBatteryOptimizationIgnored()
+    val storageGranted = hasStoragePermission()
     val platforms by viewModel.enabledPlatforms.collectAsState()
     var startOnBoot by remember { mutableStateOf(viewModel.startOnBoot) }
 
@@ -86,6 +89,13 @@ fun HomeScreen(
             if (!batteryOptimized) {
                 BatteryOptimizationCard(onAllow = {
                     onRequestIgnoreBatteryOptimization()
+                })
+            }
+
+            // Storage & Media Permission card
+            if (!storageGranted) {
+                StoragePermissionCard(onGrant = {
+                    onRequestStoragePermission()
                 })
             }
 
@@ -238,6 +248,40 @@ private fun BatteryOptimizationCard(onAllow: () -> Unit) {
             }
             TextButton(onClick = onAllow) {
                 Text("Allow", color = Color(0xFF4338CA), fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StoragePermissionCard(onGrant: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFFDCFCE7) // Soft green
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(Icons.Default.Folder, contentDescription = null, tint = Color(0xFF16A34A))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Storage & Gallery Access",
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF166534)
+                )
+                Text(
+                    "Allow access so videos appear immediately in your phone's Gallery",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFF14532D)
+                )
+            }
+            TextButton(onClick = onGrant) {
+                Text("Allow", color = Color(0xFF16A34A), fontWeight = FontWeight.Bold)
             }
         }
     }

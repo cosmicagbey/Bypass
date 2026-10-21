@@ -17,6 +17,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import com.bypass.app.R
+import java.io.File
 
 /**
  * A bottom-sheet style Activity hosting a mini WebView.
@@ -27,8 +28,10 @@ import com.bypass.app.R
  *    killing aggressive ad popups/popunders before they can fire.
  * 3. Bridges directly to native Android DownloadManager via JavascriptInterface.
  * 4. Filters out third-party ad redirects (like Google ads or shady ad networks).
- * 5. Closes automatically once download is confirmed, returning the user to their app.
- * 6. Background DownloadReceiver notifies the user when the download finishes.
+ * 5. Respects user-configured Save Location (Movies / Gallery, Downloads, DCIM).
+ * 6. Strips Referer header for Twitter/X CDN links (twimg.com) to prevent 403 Forbidden.
+ * 7. Closes automatically once download is confirmed, returning the user to their app.
+ * 8. Background DownloadReceiver notifies the user when the download finishes.
  */
 class WebViewActivity : ComponentActivity() {
 
@@ -122,7 +125,6 @@ class WebViewActivity : ComponentActivity() {
         }
 
         webView.webChromeClient = object : WebChromeClient() {
-            // Keep everything in a single view — refuse popup windows
             override fun onCreateWindow(
                 view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?
             ): Boolean = false
@@ -169,7 +171,6 @@ class WebViewActivity : ComponentActivity() {
                 }
 
                 // 5. Block external third-party redirects (Google ads, ad networks)
-                // This keeps the user on the download page and stops the "Google site" popup!
                 return true
             }
         }
@@ -202,17 +203,26 @@ class WebViewActivity : ComponentActivity() {
                 fileName += ".mp4"
             }
 
-            // Save to Movies/Bypass so Gallery apps immediately index into the "Bypass" video album
-            val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
-            val bypassDir = java.io.File(moviesDir, "Bypass")
+            // Read user preference for Save Location
+            val prefs = getSharedPreferences("bypass_prefs", Context.MODE_PRIVATE)
+            val locationPref = prefs.getString("download_location", "movies") ?: "movies"
+
+            val (destDir, subFolder) = when (locationPref) {
+                "downloads" -> Pair(Environment.DIRECTORY_DOWNLOADS, "")
+                "dcim" -> Pair(Environment.DIRECTORY_DCIM, "Bypass")
+                else -> Pair(Environment.DIRECTORY_MOVIES, "Bypass") // default: Movies/Bypass
+            }
+
+            val baseDir = Environment.getExternalStoragePublicDirectory(destDir)
+            val targetFolder = if (subFolder.isNotBlank()) File(baseDir, subFolder) else baseDir
             try {
-                if (!bypassDir.exists()) {
-                    bypassDir.mkdirs()
+                if (!targetFolder.exists()) {
+                    targetFolder.mkdirs()
                 }
             } catch (_: Exception) {}
 
-            val destinationSubPath = if (bypassDir.exists() || bypassDir.isDirectory) {
-                "Bypass/$fileName"
+            val destinationSubPath = if (subFolder.isNotBlank()) {
+                "$subFolder/$fileName"
             } else {
                 fileName
             }
@@ -226,13 +236,22 @@ class WebViewActivity : ComponentActivity() {
                 if (cookies != null) {
                     addRequestHeader("Cookie", cookies)
                 }
-                addRequestHeader("Referer", baseUrl)
+
+                // CRITICAL FIX FOR TWITTER / X (twimg.com):
+                // Twitter's CDN (video.twimg.com) has hotlink protection that blocks any request
+                // with a third-party Referer header (HTTP 403 Forbidden).
+                // Do NOT send the downloader site Referer to twimg.com!
+                val lowerUrl = downloadUrl.lowercase()
+                if (!lowerUrl.contains("twimg.com") && !lowerUrl.contains("twitter.com")) {
+                    addRequestHeader("Referer", baseUrl)
+                }
+
                 setDescription("Downloading via Bypass...")
                 setTitle(fileName)
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 @Suppress("DEPRECATION")
                 allowScanningByMediaScanner()
-                setDestinationInExternalPublicDir(Environment.DIRECTORY_MOVIES, destinationSubPath)
+                setDestinationInExternalPublicDir(destDir, destinationSubPath)
             }
 
             val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
@@ -267,6 +286,7 @@ class WebViewActivity : ComponentActivity() {
         return targetHost.endsWith(baseHost) ||
                baseHost.endsWith(targetHost) ||
                targetHost.contains("savefrom") ||
+               targetHost.contains("twittervideodownloader") ||
                targetHost.contains("ssstwitter")
     }
 
@@ -288,7 +308,7 @@ class WebViewActivity : ComponentActivity() {
         if (lower.contains("dl=1") || lower.contains("download=1") || lower.contains("download=true")) return true
         if (lower.contains("fbcdn.net") && (lower.contains("video") || lower.contains(".mp4") || lower.contains("bytestart"))) return true
         if (lower.contains("tiktokcdn.com") || lower.contains("cdninstagram.com")) return true
-        if (lower.contains("video.twimg.com")) return true
+        if (lower.contains("video.twimg.com") || lower.contains("twimg.com")) return true
 
         return false
     }
@@ -327,7 +347,7 @@ class WebViewActivity : ComponentActivity() {
 
                 // 1. Block popup ads
                 window.open = function(url) {
-                    if (url && (url.indexOf('.mp4') !== -1 || url.indexOf('videoplayback') !== -1 || url.indexOf('savefrom.net/redirect') !== -1)) {
+                    if (url && (url.indexOf('.mp4') !== -1 || url.indexOf('videoplayback') !== -1 || url.indexOf('twimg.com') !== -1 || url.indexOf('savefrom.net/redirect') !== -1)) {
                         if (window.AndroidDownloader) {
                             window.AndroidDownloader.onDownloadTriggered(url, '');
                         }
@@ -348,9 +368,11 @@ class WebViewActivity : ComponentActivity() {
                         var isDownloadBtn = hasDownload ||
                             className.indexOf('download-icon') !== -1 ||
                             className.indexOf('link-download') !== -1 ||
+                            className.indexOf('download-button') !== -1 ||
                             className.indexOf('def-btn-box') !== -1 ||
                             className.indexOf('sf-dump') !== -1 ||
                             href.indexOf('.mp4') !== -1 ||
+                            href.indexOf('twimg.com') !== -1 ||
                             href.indexOf('videoplayback') !== -1 ||
                             href.indexOf('savefrom.net/redirect') !== -1 ||
                             href.indexOf('dl=1') !== -1 ||
@@ -391,7 +413,7 @@ class WebViewActivity : ComponentActivity() {
             .replace("\r", "")
         val js = """
             (function() {
-                var inputs = document.querySelectorAll('input[type="text"], input[type="url"], input[type="search"], input:not([type])');
+                var inputs = document.querySelectorAll('#tweetURL, input[name="tweet"], input[type="text"], input[type="url"], input[type="search"], input:not([type])');
                 for (var i = 0; i < inputs.length; i++) {
                     var el = inputs[i];
                     if (el.offsetParent !== null) {
@@ -405,8 +427,9 @@ class WebViewActivity : ComponentActivity() {
                         el.dispatchEvent(new Event('change', { bubbles: true }));
                         el.dispatchEvent(new Event('keyup', { bubbles: true }));
 
-                        // If there is an adjacent submit button, tap it
-                        var submitBtn = document.querySelector('#sf_submit') ||
+                        // Submit buttons across downloader sites
+                        var submitBtn = document.querySelector('#submitBtn') ||
+                                        document.querySelector('#sf_submit') ||
                                         document.querySelector('button[type="submit"]') ||
                                         document.querySelector('.btn-download');
                         if (submitBtn) {

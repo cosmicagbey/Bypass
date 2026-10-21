@@ -39,7 +39,7 @@ class PlatformRepository(private val dao: PlatformDao) {
                     name = "X",
                     emoji = "𝕏",
                     colorHex = "#FF000000",
-                    downloaderUrl = "https://ssstwitter.com",
+                    downloaderUrl = "https://twittervideodownloader.com/",
                     isDefault = true,
                     sortOrder = 2
                 ),

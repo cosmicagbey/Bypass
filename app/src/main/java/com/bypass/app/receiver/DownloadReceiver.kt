@@ -105,12 +105,19 @@ class DownloadReceiver : BroadcastReceiver() {
                 candidatePaths.add(directMovieFile.absolutePath)
             }
 
-            // Check Downloads directory fallback
+            // Check Downloads directory
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             val downloadFile = File(downloadsDir, title)
-            if (downloadFile.exists()) {
-                candidatePaths.add(downloadFile.absolutePath)
-            }
+            if (downloadFile.exists()) candidatePaths.add(downloadFile.absolutePath)
+            val downloadBypassFile = File(downloadsDir, "Bypass/$title")
+            if (downloadBypassFile.exists()) candidatePaths.add(downloadBypassFile.absolutePath)
+
+            // Check DCIM directory
+            val dcimDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
+            val dcimBypassFile = File(dcimDir, "Bypass/$title")
+            if (dcimBypassFile.exists()) candidatePaths.add(dcimBypassFile.absolutePath)
+            val dcimFile = File(dcimDir, title)
+            if (dcimFile.exists()) candidatePaths.add(dcimFile.absolutePath)
 
             val validFiles = candidatePaths.distinct().map { File(it) }.filter { it.exists() && it.length() > 0 }
 

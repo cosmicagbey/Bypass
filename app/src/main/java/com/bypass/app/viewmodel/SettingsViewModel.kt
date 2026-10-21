@@ -12,6 +12,11 @@ import kotlinx.coroutines.launch
 class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = (app as BypassApp).repository
+    private val prefs = app.getSharedPreferences("bypass_prefs", android.content.Context.MODE_PRIVATE)
+
+    var downloadLocation: String
+        get() = prefs.getString("download_location", "movies") ?: "movies"
+        set(value) = prefs.edit().putString("download_location", value).apply()
 
     val allPlatforms = repo.allPlatforms.stateIn(
         viewModelScope,

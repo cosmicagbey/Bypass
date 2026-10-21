@@ -1,5 +1,7 @@
 package com.bypass.app.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -32,10 +35,13 @@ fun SettingsScreen(
     var editingPlatform by remember { mutableStateOf<Platform?>(null) }
     var deletingPlatform by remember { mutableStateOf<Platform?>(null) }
 
+    var downloadLocation by remember { mutableStateOf(viewModel.downloadLocation) }
+    var showLocationDialog by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Manage Platforms", fontWeight = FontWeight.Bold) },
+                title = { Text("Settings & Platforms", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -55,37 +61,49 @@ fun SettingsScreen(
             )
         }
     ) { padding ->
-        if (platforms.isEmpty()) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("🔗", fontSize = 48.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Text("No platforms yet", style = MaterialTheme.typography.titleLarge)
-                    Text("Tap + to add one", style = MaterialTheme.typography.bodyMedium)
-                }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp)
+        ) {
+            // Save Location Preference Card
+            item {
+                SaveLocationCard(
+                    locationKey = downloadLocation,
+                    onClick = { showLocationDialog = true }
+                )
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp)
-            ) {
+
+            item {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Platforms · Toggle to show/hide in radial menu",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+
+            if (platforms.isEmpty()) {
                 item {
-                    Text(
-                        "Tap to edit · Toggle to show/hide in picker",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                        modifier = Modifier.padding(horizontal = 4.dp)
-                    )
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("🔗", fontSize = 48.sp)
+                            Spacer(Modifier.height(8.dp))
+                            Text("No platforms yet", style = MaterialTheme.typography.titleLarge)
+                            Text("Tap + to add one", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
                 }
+            } else {
                 items(platforms, key = { it.id }) { platform ->
                     PlatformListItem(
                         platform = platform,
@@ -96,6 +114,57 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    // Save Location Choice Dialog
+    if (showLocationDialog) {
+        AlertDialog(
+            onDismissRequest = { showLocationDialog = false },
+            icon = { Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            title = { Text("Choose Save Location") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val options = listOf(
+                        Triple("movies", "Movies / Bypass (Recommended)", "Appears immediately in Gallery & Google Photos"),
+                        Triple("downloads", "Downloads Folder", "Saved to standard /Download directory"),
+                        Triple("dcim", "DCIM / Bypass", "Saved to camera & photos directory")
+                    )
+                    options.forEach { (key, name, desc) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    downloadLocation = key
+                                    viewModel.downloadLocation = key
+                                    showLocationDialog = false
+                                }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = (downloadLocation == key),
+                                onClick = {
+                                    downloadLocation = key
+                                    viewModel.downloadLocation = key
+                                    showLocationDialog = false
+                                }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(name, fontWeight = FontWeight.Medium)
+                                Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLocationDialog = false }) {
+                    Text("Done")
+                }
+            }
+        )
     }
 
     // Add sheet
@@ -146,6 +215,67 @@ fun SettingsScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun SaveLocationCard(
+    locationKey: String,
+    onClick: () -> Unit
+) {
+    val (title, subtitle) = when (locationKey) {
+        "downloads" -> Pair("Downloads Folder", "/Download (Standard downloads folder)")
+        "dcim" -> Pair("DCIM / Bypass", "/DCIM/Bypass (Camera roll)")
+        else -> Pair("Movies / Bypass", "/Movies/Bypass (Gallery - Recommended)")
+    }
+
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Folder,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Save Location: $title",
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                )
+            }
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 private fun PlatformListItem(
     platform: Platform,
     onEdit: () -> Unit,
@@ -161,76 +291,61 @@ private fun PlatformListItem(
         )
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // Brand icon badge or emoji
+            // Platform Brand Icon or Emoji Badge
             val iconRes = PlatformRepository.getPlatformIconRes(platform.name)
-            if (iconRes != null) {
-                Surface(
-                    shape = CircleShape,
-                    color = Color(PlatformRepository.getPlatformBrandColor(platform.name, platform.colorHex)),
-                    modifier = Modifier.size(38.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(8.dp)) {
-                        Icon(
-                            painter = painterResource(iconRes),
-                            contentDescription = platform.name,
-                            tint = Color.White,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
+            val brandColor = PlatformRepository.getPlatformBrandColor(platform.name, platform.colorHex)
+
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(brandColor),
+                contentAlignment = Alignment.Center
+            ) {
+                if (iconRes != null) {
+                    Icon(
+                        painter = painterResource(id = iconRes),
+                        contentDescription = platform.name,
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(24.dp)
+                    )
+                } else {
+                    Text(platform.emoji, fontSize = 20.sp)
                 }
-            } else {
-                Text(platform.emoji, fontSize = 28.sp)
             }
 
-            // Name + URL
+            Spacer(Modifier.width(12.dp))
+
             Column(Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(platform.name, fontWeight = FontWeight.SemiBold)
-                    if (platform.isDefault) {
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                        ) {
-                            Text(
-                                "default",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                            )
-                        }
-                    }
-                }
+                Text(platform.name, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                 Text(
                     platform.downloaderUrl,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     maxLines = 1
                 )
             }
 
-            // Enable/disable toggle
+            IconButton(onClick = onEdit) {
+                Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary)
+            }
+
+            if (!platform.isDefault) {
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFEF4444))
+                }
+            }
+
             Switch(
                 checked = platform.isEnabled,
                 onCheckedChange = { onToggle() },
-                modifier = Modifier.size(40.dp, 24.dp)
+                modifier = Modifier.padding(start = 4.dp)
             )
-
-            // Delete
-            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "Delete",
-                    tint = Color(0xFFEF4444),
-                    modifier = Modifier.size(18.dp)
-                )
-            }
         }
     }
 }

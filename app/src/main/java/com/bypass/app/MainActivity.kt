@@ -34,9 +34,16 @@ class MainActivity : ComponentActivity() {
         startBubbleServiceInternal()
     }
 
+    private val storagePermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        checkStates()
+    }
+
     private var hasOverlayState = mutableStateOf(false)
     private var isServiceRunningState = mutableStateOf(false)
     private var isBatteryOptimizedState = mutableStateOf(false)
+    private var hasStorageState = mutableStateOf(true)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,8 +55,10 @@ class MainActivity : ComponentActivity() {
                     hasOverlayPermission = { hasOverlayState.value },
                     isServiceRunning = { isServiceRunningState.value },
                     isBatteryOptimizationIgnored = { isBatteryOptimizedState.value },
+                    hasStoragePermission = { hasStorageState.value },
                     onRequestOverlayPermission = { requestOverlayPermission() },
                     onRequestIgnoreBatteryOptimization = { requestIgnoreBatteryOptimization() },
+                    onRequestStoragePermission = { requestStoragePermission() },
                     onToggleService = { running ->
                         if (running) {
                             stopBubbleService()
@@ -78,6 +87,26 @@ class MainActivity : ComponentActivity() {
             powerManager?.isIgnoringBatteryOptimizations(packageName) == true
         } else {
             true
+        }
+
+        // Storage & Media permission state
+        hasStorageState.value = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            storagePermissionLauncher.launch(arrayOf(Manifest.permission.READ_MEDIA_VIDEO))
+        } else {
+            storagePermissionLauncher.launch(arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ))
         }
     }
 

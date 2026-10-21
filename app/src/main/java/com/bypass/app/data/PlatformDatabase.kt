@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Platform::class], version = 2, exportSchema = false)
+@Database(entities = [Platform::class], version = 3, exportSchema = false)
 abstract class PlatformDatabase : RoomDatabase() {
 
     abstract fun platformDao(): PlatformDao
@@ -39,6 +39,15 @@ abstract class PlatformDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migration 2→3: Update X downloader URL to twittervideodownloader.com
+         */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("UPDATE platforms SET downloaderUrl = 'https://twittervideodownloader.com/' WHERE name = 'X'")
+            }
+        }
+
         fun getDatabase(context: Context): PlatformDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -46,7 +55,7 @@ abstract class PlatformDatabase : RoomDatabase() {
                     PlatformDatabase::class.java,
                     "bypass_db"
                 )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
                 INSTANCE = instance
                 instance
