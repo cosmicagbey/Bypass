@@ -15,6 +15,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import com.bypass.app.R
+import com.bypass.app.ui.DownloadToastOverlay
 import java.io.File
 
 /**
@@ -24,6 +25,9 @@ import java.io.File
  * Automatically scans downloaded videos into Android's MediaStore so they
  * immediately appear in the user's Gallery (Google Photos, Samsung Gallery, etc.)
  * under the "Bypass" / "Movies" album and the main Videos timeline.
+ *
+ * Also triggers a non-intrusive 0.5 - 1.0 second on-screen notification at the
+ * lower part of the screen indicating download is finished and where it was saved.
  */
 class DownloadReceiver : BroadcastReceiver() {
 
@@ -38,51 +42,86 @@ class DownloadReceiver : BroadcastReceiver() {
         val downloadId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
         if (downloadId == -1L) return
 
-        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val query = DownloadManager.Query().setFilterById(downloadId)
-        val cursor = dm.query(query) ?: return
+        val pendingResult = goAsync()
+        var asyncHandled = false
 
         try {
-            if (cursor.moveToFirst()) {
-                val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
-                val titleIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
-                val descIdx = cursor.getColumnIndex(DownloadManager.COLUMN_DESCRIPTION)
-                val uriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val query = DownloadManager.Query().setFilterById(downloadId)
+            val cursor = dm.query(query)
 
-                val status = if (statusIdx >= 0) cursor.getInt(statusIdx) else -1
-                val title = if (titleIdx >= 0) cursor.getString(titleIdx) else "Video"
-                val desc = if (descIdx >= 0) cursor.getString(descIdx) else ""
-                val localUriStr = if (uriIdx >= 0) cursor.getString(uriIdx) else null
+            if (cursor == null) {
+                pendingResult.finish()
+                return
+            }
 
-                // Only notify for downloads initiated by Bypass
-                if (desc != "Downloading via Bypass...") return
+            try {
+                if (cursor.moveToFirst()) {
+                    val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                    val titleIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+                    val descIdx = cursor.getColumnIndex(DownloadManager.COLUMN_DESCRIPTION)
+                    val uriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
 
-                if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                    // 1. Force index into Android MediaStore so it appears in the phone's Gallery
-                    indexIntoGallery(context, title, localUriStr)
+                    val status = if (statusIdx >= 0) cursor.getInt(statusIdx) else -1
+                    val title = if (titleIdx >= 0) cursor.getString(titleIdx) else "Video"
+                    val desc = if (descIdx >= 0) cursor.getString(descIdx) else ""
+                    val localUriStr = if (uriIdx >= 0) cursor.getString(uriIdx) else null
 
-                    // 2. Obtain a safe content URI for opening the video
-                    val contentUri = try {
-                        dm.getUriForDownloadedFile(downloadId)
-                    } catch (_: Exception) {
-                        null
+                    // Only notify for downloads initiated by Bypass
+                    if (desc != "Downloading via Bypass...") {
+                        pendingResult.finish()
+                        return
                     }
 
-                    // 3. Show high-priority completion notification
-                    showCompletionNotification(context, title, contentUri, localUriStr)
+                    if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                        // 1. Force index into Android MediaStore so it appears in the phone's Gallery
+                        val savedLocation = indexIntoGallery(context, title, localUriStr)
+
+                        // 2. Obtain a safe content URI for opening the video
+                        val contentUri = try {
+                            dm.getUriForDownloadedFile(downloadId)
+                        } catch (_: Exception) {
+                            null
+                        }
+
+                        // 3. Show high-priority completion notification in notification shade
+                        showCompletionNotification(context, title, contentUri, localUriStr)
+
+                        // 4. Show 0.5 - 1.0s on-screen notification at the lower part of the screen
+                        asyncHandled = true
+                        DownloadToastOverlay.show(
+                            context = context,
+                            title = "Download finished",
+                            locationText = savedLocation,
+                            durationMs = 950L,
+                            onDismiss = {
+                                try {
+                                    pendingResult.finish()
+                                } catch (_: Exception) {}
+                            }
+                        )
+                    }
                 }
+            } finally {
+                cursor.close()
             }
         } catch (_: Exception) {
         } finally {
-            cursor.close()
+            if (!asyncHandled) {
+                try {
+                    pendingResult.finish()
+                } catch (_: Exception) {}
+            }
         }
     }
 
     /**
      * Scans the downloaded video file into MediaStore so it immediately
      * shows up in the user's Gallery app under Movies/Bypass.
+     * Returns a human-readable display of where the video was saved.
      */
-    private fun indexIntoGallery(context: Context, title: String, localUriStr: String?) {
+    private fun indexIntoGallery(context: Context, title: String, localUriStr: String?): String {
+        var detectedLocation: String? = null
         try {
             val candidatePaths = mutableListOf<String>()
 
@@ -99,25 +138,39 @@ class DownloadReceiver : BroadcastReceiver() {
             val bypassFile = File(moviesDir, "Bypass/$title")
             if (bypassFile.exists()) {
                 candidatePaths.add(bypassFile.absolutePath)
+                detectedLocation = "Movies / Bypass (Gallery)"
             }
             val directMovieFile = File(moviesDir, title)
             if (directMovieFile.exists()) {
                 candidatePaths.add(directMovieFile.absolutePath)
+                if (detectedLocation == null) detectedLocation = "Movies (Gallery)"
             }
 
             // Check Downloads directory
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             val downloadFile = File(downloadsDir, title)
-            if (downloadFile.exists()) candidatePaths.add(downloadFile.absolutePath)
+            if (downloadFile.exists()) {
+                candidatePaths.add(downloadFile.absolutePath)
+                if (detectedLocation == null) detectedLocation = "Downloads"
+            }
             val downloadBypassFile = File(downloadsDir, "Bypass/$title")
-            if (downloadBypassFile.exists()) candidatePaths.add(downloadBypassFile.absolutePath)
+            if (downloadBypassFile.exists()) {
+                candidatePaths.add(downloadBypassFile.absolutePath)
+                if (detectedLocation == null) detectedLocation = "Downloads / Bypass"
+            }
 
             // Check DCIM directory
             val dcimDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
             val dcimBypassFile = File(dcimDir, "Bypass/$title")
-            if (dcimBypassFile.exists()) candidatePaths.add(dcimBypassFile.absolutePath)
+            if (dcimBypassFile.exists()) {
+                candidatePaths.add(dcimBypassFile.absolutePath)
+                if (detectedLocation == null) detectedLocation = "DCIM / Bypass (Gallery)"
+            }
             val dcimFile = File(dcimDir, title)
-            if (dcimFile.exists()) candidatePaths.add(dcimFile.absolutePath)
+            if (dcimFile.exists()) {
+                candidatePaths.add(dcimFile.absolutePath)
+                if (detectedLocation == null) detectedLocation = "DCIM (Gallery)"
+            }
 
             val validFiles = candidatePaths.distinct().map { File(it) }.filter { it.exists() && it.length() > 0 }
 
@@ -167,6 +220,17 @@ class DownloadReceiver : BroadcastReceiver() {
                 }
             }
         } catch (_: Exception) {}
+
+        if (!detectedLocation.isNullOrBlank()) {
+            return detectedLocation
+        }
+
+        val prefs = context.getSharedPreferences("bypass_prefs", Context.MODE_PRIVATE)
+        return when (prefs.getString("download_location", "movies")) {
+            "downloads" -> "Downloads"
+            "dcim" -> "DCIM / Bypass (Gallery)"
+            else -> "Movies / Bypass (Gallery)"
+        }
     }
 
     private fun showCompletionNotification(
